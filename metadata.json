@@ -1,0 +1,5 @@
+{
+  "name": "Aero Retread Inventory Dashboard",
+  "description": "A dashboard to track inventory and status for each process in the aero retread plant.",
+  "requestFramePermissions": []
+}
