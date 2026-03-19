@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
 import Papa from 'papaparse';
 import { retreadData } from '../data/retreadData';
 import { PROCESS_NAMES, processHeaders } from '../constants';
@@ -9,10 +9,21 @@ import ParetoChart from './ParetoChart';
 export default function Dashboard() {
   const [data, setData] = useState<any[]>(retreadData);
   const [selectedProcess, setSelectedProcess] = useState<string | null>(null);
-  const [paretoKeys, setParetoKeys] = useState<string[]>(["SIZE", "STAT", "AIRLINE"]);
+  const [paretoKeys, setParetoKeys] = useState<string[]>(["SIZE", "STAT"]);
   const [paretoLimit, setParetoLimit] = useState<number>(10);
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(true);
   const [filters, setFilters] = useState<Record<string, string[]>>({});
+  const [visibleStatuses, setVisibleStatuses] = useState<Record<string, boolean>>({
+    H: true,
+    R: true,
+    I: true,
+    T: true,
+    J: true,
+  });
+
+  const toggleStatus = (status: string) => {
+    setVisibleStatuses(prev => ({ ...prev, [status]: !prev[status] }));
+  };
 
   useEffect(() => {
     setFilters({});
@@ -22,7 +33,7 @@ export default function Dashboard() {
     if (data.length > 0) {
       const headers = Object.keys(data[0]);
       const findMatch = (target: string) => headers.find(h => h.toUpperCase() === target) || headers[0];
-      setParetoKeys([findMatch("SIZE"), findMatch("STAT"), findMatch("AIRLINE")]);
+      setParetoKeys([findMatch("SIZE"), findMatch("STAT")]);
     }
   }, [data]);
 
@@ -99,59 +110,78 @@ export default function Dashboard() {
     : [];
 
   return (
-    <div className="p-6 bg-stone-50 min-h-screen font-sans text-stone-900">
-      <h1 className="text-3xl font-bold mb-6 text-stone-900">Aero Retread Inventory Dashboard</h1>
+    <div className="p-6 bg-slate-950 min-h-screen font-sans text-slate-100">
+      <h1 className="text-3xl font-bold mb-6 text-slate-100">Aero Retread Inventory Dashboard</h1>
       
       <div className="mb-6">
-        <label className="block text-sm font-medium text-stone-700 mb-2">Upload CSV Data</label>
-        <input type="file" accept=".csv" onChange={handleFileUpload} className="block w-full text-sm text-stone-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-stone-100 file:text-stone-700 hover:file:bg-stone-200" />
+        <label className="block text-sm font-medium text-slate-300 mb-2">Upload CSV Data</label>
+        <input type="file" accept=".csv" onChange={handleFileUpload} className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-slate-800 file:text-slate-300 hover:file:bg-slate-700" />
       </div>
 
-      <h2 className="text-lg font-semibold mb-4">INVENTORY SUMMARY</h2>
+      <h2 className="text-lg font-semibold mb-4 text-slate-200">INVENTORY SUMMARY</h2>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-stone-200">
-          <h2 className="text-sm font-medium text-stone-500 uppercase">Total Inventory</h2>
-          <p className="text-4xl font-semibold text-stone-800">{totalInventory}</p>
+        <div className="bg-slate-900 p-6 rounded-xl shadow-sm border border-slate-800">
+          <h2 className="text-sm font-medium text-slate-400 uppercase">Total Inventory</h2>
+          <p className="text-4xl font-semibold text-slate-100">{totalInventory}</p>
         </div>
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-stone-200">
-          <h2 className="text-sm font-medium text-stone-500 uppercase">Casing ready to buff</h2>
-          <p className="text-4xl font-semibold text-stone-800">
-            {processInventory[2] ? (processInventory[2].C + processInventory[2].H + processInventory[2].R + processInventory[2].I + processInventory[2].T + processInventory[2].J) : 0}
+        <div className="bg-slate-900 p-6 rounded-xl shadow-sm border border-slate-800">
+          <h2 className="text-sm font-medium text-slate-400 uppercase">Casing ready to buff</h2>
+          <p className="text-4xl font-semibold text-slate-100">
+            {(() => {
+              const p = processInventory.find(item => item.name === 'HOT');
+              return p ? (p.C + p.H + p.R + p.I + p.T + p.J) : 0;
+            })()}
           </p>
         </div>
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-stone-200">
-          <h2 className="text-sm font-medium text-stone-500 uppercase">Green tire inventory</h2>
-          <p className="text-4xl font-semibold text-stone-800">
-            {processInventory[8] ? (processInventory[8].C + processInventory[8].H + processInventory[8].R + processInventory[8].I + processInventory[8].T + processInventory[8].J) : 0}
+        <div className="bg-slate-900 p-6 rounded-xl shadow-sm border border-slate-800">
+          <h2 className="text-sm font-medium text-slate-400 uppercase">Green tire inventory</h2>
+          <p className="text-4xl font-semibold text-slate-100">
+            {(() => {
+              const p = processInventory.find(item => item.name === 'ORB');
+              return p ? (p.C + p.H + p.R + p.I + p.T + p.J) : 0;
+            })()}
           </p>
         </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-stone-200">
-          <h2 className="text-xs font-medium text-stone-500 uppercase">Hold (H)</h2>
+        <div className="bg-slate-900 p-4 rounded-xl shadow-sm border border-slate-800">
+          <h2 className="text-xs font-medium text-slate-400 uppercase">Hold (H)</h2>
           <p className="text-2xl font-semibold text-yellow-500">{statusCounts.H}</p>
         </div>
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-stone-200">
-          <h2 className="text-xs font-medium text-stone-500 uppercase">Reprocess (R)</h2>
-          <p className="text-2xl font-semibold text-stone-700">{statusCounts.R}</p>
+        <div className="bg-slate-900 p-4 rounded-xl shadow-sm border border-slate-800">
+          <h2 className="text-xs font-medium text-slate-400 uppercase">Reprocess (R)</h2>
+          <p className="text-2xl font-semibold text-slate-300">{statusCounts.R}</p>
         </div>
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-stone-200">
-          <h2 className="text-xs font-medium text-stone-500 uppercase">In Process (I)</h2>
-          <p className="text-2xl font-semibold text-green-700">{statusCounts.I}</p>
+        <div className="bg-slate-900 p-4 rounded-xl shadow-sm border border-slate-800">
+          <h2 className="text-xs font-medium text-slate-400 uppercase">In Process (I)</h2>
+          <p className="text-2xl font-semibold text-green-400">{statusCounts.I}</p>
         </div>
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-stone-200">
-          <h2 className="text-xs font-medium text-stone-500 uppercase">Tech (T)</h2>
-          <p className="text-2xl font-semibold text-black">{statusCounts.T}</p>
+        <div className="bg-slate-900 p-4 rounded-xl shadow-sm border border-slate-800">
+          <h2 className="text-xs font-medium text-slate-400 uppercase">Tech (T)</h2>
+          <p className="text-2xl font-semibold text-slate-100">{statusCounts.T}</p>
         </div>
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-stone-200">
-          <h2 className="text-xs font-medium text-stone-500 uppercase">Reject (J)</h2>
-          <p className="text-2xl font-semibold text-red-700">{statusCounts.J}</p>
+        <div className="bg-slate-900 p-4 rounded-xl shadow-sm border border-slate-800">
+          <h2 className="text-xs font-medium text-slate-400 uppercase">Reject (J)</h2>
+          <p className="text-2xl font-semibold text-red-400">{statusCounts.J}</p>
         </div>
       </div>
 
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-8 h-96">
-        <h2 className="text-lg font-semibold mb-4">Inventory by Process & Status</h2>
+      <div className="bg-slate-900 p-6 rounded-xl shadow-sm border border-slate-800 mb-8 h-96">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-semibold text-slate-100">Inventory by Process & Status</h2>
+          <div className="flex gap-2">
+            {Object.entries({ H: 'Hold', R: 'Reprocess', I: 'In Process', T: 'Tech', J: 'Reject' }).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => toggleStatus(key)}
+                className={`px-3 py-1 rounded-full text-xs font-medium ${visibleStatuses[key] ? 'bg-indigo-900 text-indigo-200' : 'bg-slate-800 text-slate-500'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={processInventory} margin={{ top: 20, right: 30, left: 20, bottom: 60 }} onClick={(data) => {
             if (data && data.activeLabel) {
@@ -159,16 +189,22 @@ export default function Dashboard() {
               if (initial) setSelectedProcess(initial);
             }
           }}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="fullName" tick={{ fontSize: 8 }} height={80} interval={0} dy={15} />
-            <YAxis />
-            <Tooltip />
-            <Legend verticalAlign="bottom" height={36} wrapperStyle={{ paddingTop: '20px' }} />
-            <Bar dataKey="H" stackId="a" fill="#eab308" name="Hold (H)" />
-            <Bar dataKey="R" stackId="a" fill="#854d0e" name="Reprocess (R)" />
-            <Bar dataKey="I" stackId="a" fill="#15803d" name="In Process (I)" />
-            <Bar dataKey="T" stackId="a" fill="#000000" name="Tech (T)" />
-            <Bar dataKey="J" stackId="a" fill="#b91c1c" name="Reject (J)" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+            <XAxis dataKey="fullName" tick={{ fontSize: 8, fill: '#94a3b8' }} height={80} interval={0} dy={15} />
+            <YAxis tick={{ fill: '#94a3b8' }} />
+            <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f1f5f9' }} />
+            <Legend verticalAlign="bottom" height={36} wrapperStyle={{ paddingTop: '20px', color: '#94a3b8' }} />
+            {visibleStatuses.H && (
+              <Bar dataKey="H" stackId="a" fill="#eab308" name="Hold (H)">
+                {processInventory.map((entry, index) => (
+                  <Cell key={`cell-${index}`} stroke="#000" strokeWidth={1} />
+                ))}
+              </Bar>
+            )}
+            {visibleStatuses.R && <Bar dataKey="R" stackId="a" fill="#a16207" name="Reprocess (R)" />}
+            {visibleStatuses.I && <Bar dataKey="I" stackId="a" fill="#16a34a" name="In Process (I)" />}
+            {visibleStatuses.T && <Bar dataKey="T" stackId="a" fill="#f8fafc" name="Tech (T)" />}
+            {visibleStatuses.J && <Bar dataKey="J" stackId="a" fill="#dc2626" name="Reject (J)" />}
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -190,13 +226,13 @@ export default function Dashboard() {
               <option value={0}>All</option>
             </select>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
             {paretoKeys.map((key, index) => (
               <div key={index} className="space-y-2">
                 <select 
                   value={key} 
                   onChange={(e) => handleKeyChange(index, e.target.value)}
-                  className="w-full p-2 border border-slate-300 rounded-md text-sm"
+                  className="w-full p-2 border border-slate-700 bg-slate-800 rounded-md text-sm text-slate-100"
                 >
                   {availableHeaders.map(h => <option key={h} value={h}>{h}</option>)}
                 </select>
@@ -213,26 +249,26 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-8">
+      <div className="bg-slate-900 p-6 rounded-xl shadow-sm border border-slate-800 mb-8">
         <div className="flex justify-between items-center mb-4 cursor-pointer" onClick={() => setIsDetailsExpanded(!isDetailsExpanded)}>
-          <h2 className="text-lg font-semibold">Detailed Process Inventory</h2>
-          <button className="text-sm text-slate-500">{isDetailsExpanded ? 'Collapse' : 'Expand'}</button>
+          <h2 className="text-lg font-semibold text-slate-100">Detailed Process Inventory</h2>
+          <button className="text-sm text-slate-400">{isDetailsExpanded ? 'Collapse' : 'Expand'}</button>
         </div>
         {isDetailsExpanded && (
         <table className="w-full text-left">
           <thead>
-            <tr className="border-b border-slate-200">
-              <th className="pb-3">Process</th>
-              <th className="pb-3">Full Name</th>
-              <th className="pb-3">Total</th>
+            <tr className="border-b border-slate-700">
+              <th className="pb-3 text-slate-300">Process</th>
+              <th className="pb-3 text-slate-300">Full Name</th>
+              <th className="pb-3 text-slate-300">Total</th>
             </tr>
           </thead>
           <tbody>
             {processInventory.map(p => (
-              <tr key={p.name} onClick={() => setSelectedProcess(p.name)} className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer">
-                <td className="py-3 font-mono font-bold text-indigo-600">{p.name}</td>
-                <td className="py-3 text-slate-600">{p.fullName}</td>
-                <td className="py-3 text-indigo-600 font-semibold">{p.C + p.H + p.R + p.I + p.T + p.J}</td>
+              <tr key={p.name} onClick={() => setSelectedProcess(p.name)} className="border-b border-slate-800 hover:bg-slate-800 cursor-pointer">
+                <td className="py-3 font-mono font-bold text-indigo-400">{p.name}</td>
+                <td className="py-3 text-slate-300">{p.fullName}</td>
+                <td className="py-3 text-indigo-400 font-semibold">{p.C + p.H + p.R + p.I + p.T + p.J}</td>
               </tr>
             ))}
           </tbody>
@@ -241,16 +277,16 @@ export default function Dashboard() {
       </div>
 
       {selectedProcess && (
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+        <div className="bg-slate-900 p-6 rounded-xl shadow-sm border border-slate-800">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-semibold">Orders in {selectedProcess} ({PROCESS_NAMES[selectedProcess]})</h2>
+            <h2 className="text-lg font-semibold text-slate-100">Orders in {selectedProcess} ({PROCESS_NAMES[selectedProcess]})</h2>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>
-                <tr className="border-b border-slate-200">
+                <tr className="border-b border-slate-700">
                   {selectedOrders.length > 0 && Object.keys(selectedOrders[0]).map(header => (
-                    <th key={header} className="pb-2 px-2 font-semibold text-slate-700 relative group">
+                    <th key={header} className="pb-2 px-2 font-semibold text-slate-300 relative group">
                       <div className="flex items-center gap-1">
                         {header}
                         <button
@@ -260,15 +296,15 @@ export default function Dashboard() {
                             else newFilters[header] = [];
                             setFilters(newFilters);
                           }}
-                          className={`text-xs ${filters.hasOwnProperty(header) ? 'text-indigo-600' : 'text-slate-400'}`}
+                          className={`text-xs ${filters.hasOwnProperty(header) ? 'text-indigo-400' : 'text-slate-500'}`}
                         >
                           ▼
                         </button>
                       </div>
                       {filters.hasOwnProperty(header) && (
-                        <div className="absolute top-full left-0 z-10 bg-white border border-slate-200 shadow-lg p-2 rounded-md w-48 max-h-60 overflow-y-auto">
+                        <div className="absolute top-full left-0 z-10 bg-slate-800 border border-slate-700 shadow-lg p-2 rounded-md w-48 max-h-60 overflow-y-auto">
                           {Array.from(new Set(selectedOrders.map(o => String(o[header])))).sort().map(val => (
-                            <label key={val} className="flex items-center gap-2 text-xs py-1 cursor-pointer hover:bg-slate-50">
+                            <label key={val} className="flex items-center gap-2 text-xs py-1 cursor-pointer hover:bg-slate-700 text-slate-200">
                               <input
                                 type="checkbox"
                                 checked={filters[header].length === 0 || filters[header].includes(val)}
@@ -307,9 +343,9 @@ export default function Dashboard() {
                     )
                   )
                   .map((order, idx) => (
-                  <tr key={idx} className="border-b border-slate-50 hover:bg-slate-50">
+                  <tr key={idx} className="border-b border-slate-800 hover:bg-slate-800">
                     {Object.keys(order).map(header => (
-                      <td key={header} className="py-2 px-2 text-xs font-mono text-slate-600">{String(order[header])}</td>
+                      <td key={header} className="py-2 px-2 text-xs font-mono text-slate-400">{String(order[header])}</td>
                     ))}
                   </tr>
                 ))}

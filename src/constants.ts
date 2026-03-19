@@ -1,20 +1,17 @@
 export const PROCESS_NAMES: Record<string, string> = {
-  INI: "PRE AIR INJECTION",
-  HO1: "PRE PRESHAROGRAPHY",
+  INI: "PRE-AIR",
+  HO1: "PRE-SDS",
   HOT: "HOT HOUSE",
-  "Q-H": "QA AFTER HOT HOUSE",
   BUF: "BUFFING",
   REP: "REPAIRING",
-  "Q-R": "QA AFTER CEMENTING",
   BLD: "BUILDING",
-  ORB: "ORBITREADING",
-  "Q-O": "QA AFTER ORBITREADING",
+  ORB: "ORBITREAD",
   CUR: "CURING",
-  "Q-C": "QA AFTER CURING",
-  HO2: "POST SHEAROGRAPHY",
-  INJ: "POST AIR INJECTION",
-  FIN: "FINAL FINISHING",
-  "Q-F": "QA AFTER FINISHING"
+  "Q-C": "QA CURE",
+  HO2: "POST-SDS",
+  INJ: "POST-AIR",
+  FIN: "FF",
+  "Q-F": "QA FF"
 };
 
 export const processHeaders = Object.keys(PROCESS_NAMES);
