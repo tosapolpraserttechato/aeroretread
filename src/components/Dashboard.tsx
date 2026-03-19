@@ -11,7 +11,6 @@ export default function Dashboard() {
   const [selectedProcess, setSelectedProcess] = useState<string | null>(null);
   const [paretoKeys, setParetoKeys] = useState<string[]>(["SIZE", "STAT"]);
   const [paretoLimit, setParetoLimit] = useState<number>(10);
-  const [isDetailsExpanded, setIsDetailsExpanded] = useState(true);
   const [filters, setFilters] = useState<Record<string, string[]>>({});
   const [visibleStatuses, setVisibleStatuses] = useState<Record<string, boolean>>({
     H: true,
@@ -193,7 +192,24 @@ export default function Dashboard() {
             <XAxis dataKey="fullName" tick={{ fontSize: 8, fill: '#94a3b8' }} height={80} interval={0} dy={15} />
             <YAxis tick={{ fill: '#94a3b8' }} />
             <Tooltip contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', color: '#f1f5f9' }} />
-            <Legend verticalAlign="bottom" height={36} wrapperStyle={{ paddingTop: '20px', color: '#94a3b8' }} />
+            <Legend 
+              verticalAlign="bottom" 
+              height={36} 
+              wrapperStyle={{ paddingTop: '20px', color: '#94a3b8', cursor: 'pointer' }} 
+              onClick={(props: any) => {
+                const statusMap: Record<string, string> = {
+                  'Hold (H)': 'H',
+                  'Reprocess (R)': 'R',
+                  'In Process (I)': 'I',
+                  'Tech (T)': 'T',
+                  'Reject (J)': 'J'
+                };
+                const statusKey = statusMap[props.value];
+                if (statusKey) {
+                  toggleStatus(statusKey);
+                }
+              }}
+            />
             {visibleStatuses.H && (
               <Bar dataKey="H" stackId="a" fill="#eab308" name="Hold (H)">
                 {processInventory.map((entry, index) => (
@@ -210,6 +226,7 @@ export default function Dashboard() {
       </div>
 
       <ProcessFlow processInventory={processInventory} onProcessClick={setSelectedProcess} selectedProcess={selectedProcess} />
+
 
       {selectedProcess && (
         <div className="mt-8">
@@ -248,33 +265,6 @@ export default function Dashboard() {
           </div>
         </div>
       )}
-
-      <div className="bg-slate-900 p-6 rounded-xl shadow-sm border border-slate-800 mb-8">
-        <div className="flex justify-between items-center mb-4 cursor-pointer" onClick={() => setIsDetailsExpanded(!isDetailsExpanded)}>
-          <h2 className="text-lg font-semibold text-slate-100">Detailed Process Inventory</h2>
-          <button className="text-sm text-slate-400">{isDetailsExpanded ? 'Collapse' : 'Expand'}</button>
-        </div>
-        {isDetailsExpanded && (
-        <table className="w-full text-left">
-          <thead>
-            <tr className="border-b border-slate-700">
-              <th className="pb-3 text-slate-300">Process</th>
-              <th className="pb-3 text-slate-300">Full Name</th>
-              <th className="pb-3 text-slate-300">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {processInventory.map(p => (
-              <tr key={p.name} onClick={() => setSelectedProcess(p.name)} className="border-b border-slate-800 hover:bg-slate-800 cursor-pointer">
-                <td className="py-3 font-mono font-bold text-indigo-400">{p.name}</td>
-                <td className="py-3 text-slate-300">{p.fullName}</td>
-                <td className="py-3 text-indigo-400 font-semibold">{p.C + p.H + p.R + p.I + p.T + p.J}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        )}
-      </div>
 
       {selectedProcess && (
         <div className="bg-slate-900 p-6 rounded-xl shadow-sm border border-slate-800">

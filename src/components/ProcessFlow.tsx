@@ -25,11 +25,18 @@ export default function ProcessFlow({ processInventory, onProcessClick, selected
                 }`}
               >
                 <div className="absolute top-1 left-2 text-xs font-bold text-slate-500">{index + 1}</div>
-                <div className="text-sm font-bold text-indigo-200 mb-1 line-clamp-2 leading-tight" title={p.fullName}>{p.fullName}</div>
-                <div className="text-2xl font-bold text-slate-100">{total}</div>
+                <div className="text-xs font-bold text-indigo-200 mb-1 line-clamp-2 leading-tight" title={p.fullName}>{p.fullName}</div>
+                <div className="text-xl font-bold text-slate-100 mb-2">{total}</div>
+                <div className="grid grid-cols-5 gap-1 text-[10px] text-slate-400">
+                  <div title="In Process" className="text-green-400">{p.I}</div>
+                  <div title="Hold" className="text-yellow-500">{p.H}</div>
+                  <div title="Reprocess" className="text-slate-300">{p.R}</div>
+                  <div title="Tech" className="text-slate-100">{p.T}</div>
+                  <div title="Reject" className="text-red-400">{p.J}</div>
+                </div>
               </div>
               {index < 6 && (
-                <div className="mx-1 text-slate-600">→</div>
+                <div className="mx-1 text-2xl text-slate-600">→</div>
               )}
             </div>
           );
@@ -51,11 +58,18 @@ export default function ProcessFlow({ processInventory, onProcessClick, selected
                 }`}
               >
                 <div className="absolute top-1 left-2 text-xs font-bold text-slate-500">{actualIndex + 1}</div>
-                <div className="text-sm font-bold text-indigo-200 mb-1 line-clamp-2 leading-tight" title={p.fullName}>{p.fullName}</div>
-                <div className="text-2xl font-bold text-slate-100">{total}</div>
+                <div className="text-xs font-bold text-indigo-200 mb-1 line-clamp-2 leading-tight" title={p.fullName}>{p.fullName}</div>
+                <div className="text-xl font-bold text-slate-100 mb-2">{total}</div>
+                <div className="grid grid-cols-5 gap-1 text-[10px] text-slate-400">
+                  <div title="In Process" className="text-green-400">{p.I}</div>
+                  <div title="Hold" className="text-yellow-500">{p.H}</div>
+                  <div title="Reprocess" className="text-slate-300">{p.R}</div>
+                  <div title="Tech" className="text-slate-100">{p.T}</div>
+                  <div title="Reject" className="text-red-400">{p.J}</div>
+                </div>
               </div>
               {actualIndex < processInventory.length - 1 && (
-                <div className="mx-1 text-slate-600">→</div>
+                <div className="mx-1 text-2xl text-slate-600">→</div>
               )}
             </div>
           );
