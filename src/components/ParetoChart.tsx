@@ -38,7 +38,7 @@ export default function ParetoChart({ data, title, dataKey, nameKey, limit }: Pa
     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-8 h-96">
       <h2 className="text-lg font-semibold mb-4">{title}</h2>
       <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={displayData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+        <ComposedChart data={displayData} margin={{ top: 20, right: 30, left: 20, bottom: 60 }}>
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis dataKey="name" />
           <YAxis yAxisId="left" orientation="left" stroke="#8884d8" />
@@ -49,7 +49,7 @@ export default function ParetoChart({ data, title, dataKey, nameKey, limit }: Pa
               name
             ]}
           />
-          <Legend />
+          <Legend verticalAlign="bottom" height={36} wrapperStyle={{ paddingTop: '20px' }} />
           <Bar yAxisId="left" dataKey="count" fill="#57534e" name="Frequency" />
           <Line yAxisId="right" type="monotone" dataKey="cumulativePercentage" stroke="#b45309" name="Cumulative %" />
         </ComposedChart>

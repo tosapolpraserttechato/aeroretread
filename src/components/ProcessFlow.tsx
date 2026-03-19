@@ -9,7 +9,7 @@ interface ProcessFlowProps {
 export default function ProcessFlow({ processInventory, onProcessClick, selectedProcess }: ProcessFlowProps) {
   return (
     <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-8">
-      <h2 className="text-lg font-semibold mb-6">Factory Process Flow</h2>
+      <h2 className="text-lg font-semibold mb-6">Aero Retread Process Flow</h2>
       <div className="flex flex-wrap gap-2 items-center justify-center">
         {processInventory.map((p, index) => {
           const total = p.C + p.H + p.R + p.I + p.T + p.J;

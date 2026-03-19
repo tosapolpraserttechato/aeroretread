@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import Papa from 'papaparse';
 import { retreadData } from '../data/retreadData';
@@ -12,6 +12,11 @@ export default function Dashboard() {
   const [paretoKeys, setParetoKeys] = useState<string[]>(["SIZE", "STAT", "AIRLINE"]);
   const [paretoLimit, setParetoLimit] = useState<number>(10);
   const [isDetailsExpanded, setIsDetailsExpanded] = useState(true);
+  const [filters, setFilters] = useState<Record<string, string[]>>({});
+
+  useEffect(() => {
+    setFilters({});
+  }, [selectedProcess]);
 
   useEffect(() => {
     if (data.length > 0) {
@@ -102,16 +107,27 @@ export default function Dashboard() {
         <input type="file" accept=".csv" onChange={handleFileUpload} className="block w-full text-sm text-stone-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-stone-100 file:text-stone-700 hover:file:bg-stone-200" />
       </div>
 
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-stone-200 mb-8">
-        <h2 className="text-sm font-medium text-stone-500 uppercase">Total Inventory</h2>
-        <p className="text-4xl font-semibold text-stone-800">{totalInventory}</p>
+      <h2 className="text-lg font-semibold mb-4">INVENTORY SUMMARY</h2>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-stone-200">
+          <h2 className="text-sm font-medium text-stone-500 uppercase">Total Inventory</h2>
+          <p className="text-4xl font-semibold text-stone-800">{totalInventory}</p>
+        </div>
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-stone-200">
+          <h2 className="text-sm font-medium text-stone-500 uppercase">Casing ready to buff</h2>
+          <p className="text-4xl font-semibold text-stone-800">
+            {processInventory[2] ? (processInventory[2].C + processInventory[2].H + processInventory[2].R + processInventory[2].I + processInventory[2].T + processInventory[2].J) : 0}
+          </p>
+        </div>
+        <div className="bg-white p-6 rounded-xl shadow-sm border border-stone-200">
+          <h2 className="text-sm font-medium text-stone-500 uppercase">Green tire inventory</h2>
+          <p className="text-4xl font-semibold text-stone-800">
+            {processInventory[8] ? (processInventory[8].C + processInventory[8].H + processInventory[8].R + processInventory[8].I + processInventory[8].T + processInventory[8].J) : 0}
+          </p>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-stone-200">
-          <h2 className="text-xs font-medium text-stone-500 uppercase">Completed (C)</h2>
-          <p className="text-2xl font-semibold text-stone-700">{statusCounts.C}</p>
-        </div>
         <div className="bg-white p-4 rounded-xl shadow-sm border border-stone-200">
           <h2 className="text-xs font-medium text-stone-500 uppercase">Hold (H)</h2>
           <p className="text-2xl font-semibold text-yellow-500">{statusCounts.H}</p>
@@ -137,7 +153,7 @@ export default function Dashboard() {
       <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-8 h-96">
         <h2 className="text-lg font-semibold mb-4">Inventory by Process & Status</h2>
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={processInventory} onClick={(data) => {
+          <BarChart data={processInventory} margin={{ top: 20, right: 30, left: 20, bottom: 60 }} onClick={(data) => {
             if (data && data.activeLabel) {
               const initial = Object.keys(PROCESS_NAMES).find(key => PROCESS_NAMES[key] === data.activeLabel);
               if (initial) setSelectedProcess(initial);
@@ -147,8 +163,7 @@ export default function Dashboard() {
             <XAxis dataKey="fullName" tick={{ fontSize: 8 }} height={80} interval={0} dy={15} />
             <YAxis />
             <Tooltip />
-            <Legend />
-            <Bar dataKey="C" stackId="a" fill="#57534e" name="Completed (C)" />
+            <Legend verticalAlign="bottom" height={36} wrapperStyle={{ paddingTop: '20px' }} />
             <Bar dataKey="H" stackId="a" fill="#eab308" name="Hold (H)" />
             <Bar dataKey="R" stackId="a" fill="#854d0e" name="Reprocess (R)" />
             <Bar dataKey="I" stackId="a" fill="#15803d" name="In Process (I)" />
@@ -227,18 +242,71 @@ export default function Dashboard() {
 
       {selectedProcess && (
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-          <h2 className="text-lg font-semibold mb-4">Orders in {selectedProcess} ({PROCESS_NAMES[selectedProcess]})</h2>
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-lg font-semibold">Orders in {selectedProcess} ({PROCESS_NAMES[selectedProcess]})</h2>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-200">
                   {selectedOrders.length > 0 && Object.keys(selectedOrders[0]).map(header => (
-                    <th key={header} className="pb-2 px-2 font-semibold text-slate-700">{header}</th>
+                    <th key={header} className="pb-2 px-2 font-semibold text-slate-700 relative group">
+                      <div className="flex items-center gap-1">
+                        {header}
+                        <button
+                          onClick={() => {
+                            const newFilters = { ...filters };
+                            if (newFilters[header]) delete newFilters[header];
+                            else newFilters[header] = [];
+                            setFilters(newFilters);
+                          }}
+                          className={`text-xs ${filters.hasOwnProperty(header) ? 'text-indigo-600' : 'text-slate-400'}`}
+                        >
+                          ▼
+                        </button>
+                      </div>
+                      {filters.hasOwnProperty(header) && (
+                        <div className="absolute top-full left-0 z-10 bg-white border border-slate-200 shadow-lg p-2 rounded-md w-48 max-h-60 overflow-y-auto">
+                          {Array.from(new Set(selectedOrders.map(o => String(o[header])))).sort().map(val => (
+                            <label key={val} className="flex items-center gap-2 text-xs py-1 cursor-pointer hover:bg-slate-50">
+                              <input
+                                type="checkbox"
+                                checked={filters[header].length === 0 || filters[header].includes(val)}
+                                onChange={(e) => {
+                                  const allValues = Array.from(new Set(selectedOrders.map(o => String(o[header]))));
+                                  const current = filters[header].length === 0 ? allValues : filters[header];
+                                  let next;
+                                  if (e.target.checked) {
+                                    // Add to selected
+                                    next = [...current, val];
+                                  } else {
+                                    // Remove from selected
+                                    next = current.filter(v => v !== val);
+                                  }
+                                  // If all values are selected, we can clear the filter to indicate 'all'
+                                  if (next.length === allValues.length) {
+                                    next = [];
+                                  }
+                                  setFilters({ ...filters, [header]: next });
+                                }}
+                              />
+                              {val}
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {selectedOrders.map((order, idx) => (
+                {selectedOrders
+                  .filter(order =>
+                    Object.keys(filters).every(header =>
+                      filters[header].length === 0 || filters[header].includes(String(order[header]))
+                    )
+                  )
+                  .map((order, idx) => (
                   <tr key={idx} className="border-b border-slate-50 hover:bg-slate-50">
                     {Object.keys(order).map(header => (
                       <td key={header} className="py-2 px-2 text-xs font-mono text-slate-600">{String(order[header])}</td>
