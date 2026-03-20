@@ -7,7 +7,49 @@ import ProcessFlow from './ProcessFlow';
 import ParetoChart from './ParetoChart';
 
 export default function Dashboard() {
-  const [data, setData] = useState<any[]>(retreadData);
+  function processData(rawData: any[]) {
+    if (!rawData || rawData.length === 0) return [];
+
+    // 1. Trim headers and create new objects with trimmed keys
+    const trimmedData = rawData.map(row => {
+      const newRow: any = {};
+      Object.keys(row).forEach(key => {
+        newRow[key.trim()] = row[key];
+      });
+      return newRow;
+    });
+
+    const columnsToFill = ["MATERIAL", "SIZE", "CUSTOMER", "AIRLINE"];
+    const lastValues: Record<string, any> = {};
+    
+    return trimmedData.map((row) => {
+      const processedRow = { ...row };
+      
+      // 2. Forward Fill
+      columnsToFill.forEach((col) => {
+        const val = processedRow[col];
+        if (val !== undefined && val !== null && String(val).trim() !== "") {
+          lastValues[col] = val;
+        } else if (lastValues[col] !== undefined) {
+          processedRow[col] = lastValues[col];
+        }
+      });
+
+      // 3. Data Formatting (Remove .0 from MATERIAL and CUSTOMER)
+      ["MATERIAL", "CUSTOMER"].forEach(col => {
+        if (processedRow[col] !== undefined && processedRow[col] !== null) {
+          let val = String(processedRow[col]);
+          if (val.endsWith(".0")) {
+            processedRow[col] = val.slice(0, -2);
+          }
+        }
+      });
+
+      return processedRow;
+    });
+  }
+
+  const [data, setData] = useState<any[]>(() => processData(retreadData));
   const [selectedProcess, setSelectedProcess] = useState<string | null>(null);
   const [paretoKeys, setParetoKeys] = useState<string[]>(["SIZE", "STAT"]);
   const [paretoLimit, setParetoLimit] = useState<number>(10);
@@ -51,7 +93,7 @@ export default function Dashboard() {
         header: true,
         skipEmptyLines: true,
         complete: (results) => {
-          setData(results.data);
+          setData(processData(results.data));
           setSelectedProcess(null);
         },
       });
