@@ -1,8 +1,9 @@
 import { PROCESS_NAMES } from '../constants';
 import { AlertCircle, RotateCcw, Play, Wrench, XCircle } from 'lucide-react';
+import { ProcessInventoryCounts } from '../types';
 
 interface ProcessFlowProps {
-  processInventory: any[];
+  processInventory: ProcessInventoryCounts[];
   onProcessClick: (process: string) => void;
   selectedProcess: string | null;
 }
@@ -16,21 +17,22 @@ const STATUS_CONFIG: Record<string, { label: string, color: string, icon: any, g
 };
 
 export default function ProcessFlow({ processInventory, onProcessClick, selectedProcess }: ProcessFlowProps) {
-  const getPrevalentStatus = (p: any) => {
-    const statuses = ['I', 'H', 'R', 'T', 'J'];
+  const getPrevalentStatus = (p: ProcessInventoryCounts) => {
+    const statuses: (keyof ProcessInventoryCounts)[] = ['I', 'H', 'R', 'T', 'J'];
     let maxVal = -1;
-    let prevalent = null;
+    let prevalent: string | null = null;
     
     statuses.forEach(s => {
-      if (p[s] > maxVal && p[s] > 0) {
-        maxVal = p[s];
+      const val = p[s] as number;
+      if (val > maxVal && val > 0) {
+        maxVal = val;
         prevalent = s;
       }
     });
     return prevalent;
   };
 
-  const renderProcessCard = (p: any, index: number, actualIndex: number) => {
+  const renderProcessCard = (p: ProcessInventoryCounts, index: number, actualIndex: number) => {
     const total = p.C + p.H + p.R + p.I + p.T + p.J;
     const isSelected = selectedProcess === p.name;
     const prevalent = getPrevalentStatus(p);

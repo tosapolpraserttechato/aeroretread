@@ -1,7 +1,8 @@
 import { ComposedChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Line } from 'recharts';
+import { RetreadData } from '../types';
 
 interface ParetoChartProps {
-  data: any[];
+  data: RetreadData[];
   title: string;
   dataKey: string;
   nameKey: string;
