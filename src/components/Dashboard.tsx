@@ -284,6 +284,24 @@ export default function Dashboard() {
   const [selectedProcess, setSelectedProcess] = useState<string | null>(null);
   const [tableViewMode, setTableViewMode] = useState<'summary' | 'matrix'>('summary');
 
+  // HOT HOUSE SKU Inventory threshold states
+  const [skuMinThresholds, setSkuMinThresholds] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem('skuMinThresholds');
+      return saved ? JSON.parse(saved) : {};
+    } catch (e) {
+      return {};
+    }
+  });
+  const [showHotHouseSkus, setShowHotHouseSkus] = useState<boolean>(false);
+  const [hotHouseSkuSearch, setHotHouseSkuSearch] = useState<string>('');
+
+  const handleUpdateThreshold = (sku: string, value: number) => {
+    const updated = { ...skuMinThresholds, [sku]: value };
+    setSkuMinThresholds(updated);
+    localStorage.setItem('skuMinThresholds', JSON.stringify(updated));
+  };
+
   const getTableHeaders = (sampleRow: any) => {
     if (!sampleRow) return [];
     if (tableViewMode === 'summary') {
@@ -491,6 +509,66 @@ export default function Dashboard() {
   });
 
   const totalInventory = processInventory.reduce((acc, curr) => acc + curr.C + curr.R + curr.I + curr.T + curr.J + curr.H, 0);
+
+  // HOT HOUSE SKU Inventory calculation
+  const hotHouseSkuInventory = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    const metadata: Record<string, { size: string, customer: string }> = {};
+
+    data.forEach(item => {
+      const material = String(item["MATERIAL"] || '');
+      if (!material) return;
+
+      if (!metadata[material]) {
+        metadata[material] = {
+          size: String(item["SIZE"] || 'N/A'),
+          customer: String(item["CUSTOMER"] || 'N/A')
+        };
+      }
+
+      // Determine if item is in HOT HOUSE (rightmost process with C or H is HOT)
+      let currentProcess = null;
+      for (let i = processHeaders.length - 1; i >= 0; i--) {
+        const proc = processHeaders[i];
+        const status = item[proc as keyof typeof item];
+        if (status === 'C' || status === 'H') {
+          currentProcess = proc;
+          break;
+        }
+      }
+
+      if (currentProcess === 'HOT') {
+        counts[material] = (counts[material] || 0) + 1;
+      }
+    });
+
+    // Make sure all unique materials found in dataset are represented (even if 0 in HOT HOUSE)
+    const list = Object.keys(metadata).map(sku => {
+      const count = counts[sku] || 0;
+      const minLimit = skuMinThresholds[sku] !== undefined ? skuMinThresholds[sku] : 2; // Default min threshold is 2
+      return {
+        sku,
+        size: metadata[sku].size,
+        customer: metadata[sku].customer,
+        count,
+        minLimit,
+        isBelowLimit: count < minLimit
+      };
+    });
+
+    // Sort: below limits first, then by count descending
+    return list.sort((a, b) => {
+      if (a.isBelowLimit !== b.isBelowLimit) {
+        return a.isBelowLimit ? -1 : 1;
+      }
+      return b.count - a.count;
+    });
+  }, [data, skuMinThresholds]);
+
+  // Determine if any active SKU in Hot House is under-stocked
+  const hasHotHouseUnderStock = React.useMemo(() => {
+    return hotHouseSkuInventory.some(item => item.isBelowLimit && item.minLimit > 0);
+  }, [hotHouseSkuInventory]);
 
 
 
@@ -710,25 +788,55 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="relative overflow-hidden bg-slate-900/80 hover:bg-slate-900 p-6 rounded-2xl border border-slate-800/60 hover:border-emerald-500/30 transition-all duration-300 group shadow-md shadow-slate-950/50">
-          <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-emerald-500/5 rounded-full blur-2xl group-hover:bg-emerald-500/10 transition-all duration-300"></div>
+        <div 
+          onClick={() => setShowHotHouseSkus(!showHotHouseSkus)}
+          className={`relative overflow-hidden cursor-pointer p-6 rounded-2xl border transition-all duration-300 group shadow-md shadow-slate-950/50 ${
+            showHotHouseSkus
+              ? 'bg-emerald-950/10 border-emerald-500 shadow-lg shadow-emerald-950/20'
+              : hasHotHouseUnderStock
+                ? 'bg-amber-950/20 border-amber-500/80 hover:border-amber-400'
+                : 'bg-slate-900/80 hover:bg-slate-900 border-slate-800/60 hover:border-emerald-500/30'
+          }`}
+        >
+          <div className={`absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 rounded-full blur-2xl transition-all duration-300 ${
+            hasHotHouseUnderStock 
+              ? 'bg-amber-500/10 group-hover:bg-amber-500/20' 
+              : 'bg-emerald-500/5 group-hover:bg-emerald-500/10'
+          }`}></div>
+          
+          {hasHotHouseUnderStock && (
+            <div className="absolute top-2 right-2 flex items-center gap-1 bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/30 text-[8px] font-black uppercase tracking-wider animate-pulse">
+              <AlertTriangle size={8} />
+              <span>Low SKU Qty</span>
+            </div>
+          )}
+
           <div className="flex items-start justify-between">
             <div>
               <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Casing Ready To Buff</h2>
-              <p className="text-4xl font-extrabold text-slate-55 mt-2 tracking-tight">
+              <p className="text-4xl font-extrabold text-slate-55 mt-2 tracking-tight animate-fade-in">
                 {(() => {
                   const p = processInventory.find(item => item.name === 'HOT');
                   return p ? (p.C + p.H + p.R + p.I + p.T + p.J) : 0;
                 })()}
               </p>
             </div>
-            <div className="p-3 bg-emerald-500/10 rounded-xl text-emerald-400 group-hover:scale-110 transition-transform duration-300">
+            <div className={`p-3 rounded-xl transition-transform duration-300 group-hover:scale-110 ${
+              hasHotHouseUnderStock 
+                ? 'bg-amber-500/15 text-amber-400' 
+                : 'bg-emerald-500/10 text-emerald-400'
+            }`}>
               <Clock size={22} />
             </div>
           </div>
-          <div className="mt-4 text-xs text-slate-500 flex items-center gap-1.5">
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-            Total tires currently at HOT HOUSE
+          <div className="mt-4 text-xs text-slate-500 flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <span className={`inline-block w-1.5 h-1.5 rounded-full ${hasHotHouseUnderStock ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`}></span>
+              <span>Total tires in HOT HOUSE</span>
+            </div>
+            <span className="text-[10px] text-slate-400 group-hover:text-indigo-400 transition-colors font-semibold">
+              {showHotHouseSkus ? 'Hide details ▴' : 'Show details ▾'}
+            </span>
           </div>
         </div>
 
@@ -786,7 +894,123 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* HOT HOUSE SKU Inventory Threshold Panel */}
+      {showHotHouseSkus && (
+        <div className="mb-8 p-6 rounded-2xl bg-slate-900/95 border border-emerald-500/30 shadow-2xl animate-fade-in backdrop-blur-md">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-800/80">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center">
+                  <Clock size={18} />
+                </span>
+                <h3 className="text-base font-bold text-slate-100">HOT HOUSE SKU Inventory & Minimum Limits</h3>
+              </div>
+              <p className="text-slate-400 text-xs mt-1">
+                Configure minimum safety stock levels for each casing SKU. Items below the threshold will highlight in red.
+              </p>
+            </div>
+            
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="text"
+                  placeholder="Search SKU or Size..."
+                  value={hotHouseSkuSearch}
+                  onChange={(e) => setHotHouseSkuSearch(e.target.value)}
+                  className="bg-slate-950 border border-slate-850 text-slate-200 pl-9 pr-4 py-2 rounded-xl text-xs outline-none focus:border-indigo-500 transition-colors w-48 font-medium placeholder-slate-600"
+                />
+              </div>
+              {hotHouseSkuSearch && (
+                <button 
+                  onClick={() => setHotHouseSkuSearch('')}
+                  className="text-xs text-slate-400 hover:text-slate-200"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
 
+          {/* SKU Inventory Table */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs text-slate-400">
+              <thead>
+                <tr className="text-[10px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-850 pb-2">
+                  <th className="py-2.5 px-3">SKU (Material ID)</th>
+                  <th className="py-2.5 px-3">Tire Size</th>
+                  <th className="py-2.5 px-3">Main Customer</th>
+                  <th className="py-2.5 px-3 text-center">Current Qty (In Hot House)</th>
+                  <th className="py-2.5 px-3 text-center">Min Safety Limit</th>
+                  <th className="py-2.5 px-3 text-right">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-850/60 font-mono">
+                {(() => {
+                  const filtered = hotHouseSkuInventory.filter(item => {
+                    if (!hotHouseSkuSearch) return true;
+                    const search = hotHouseSkuSearch.toLowerCase();
+                    return item.sku.toLowerCase().includes(search) || 
+                           item.size.toLowerCase().includes(search) ||
+                           item.customer.toLowerCase().includes(search);
+                  });
+
+                  if (filtered.length === 0) {
+                    return (
+                      <tr>
+                        <td colSpan={6} className="py-8 text-center text-slate-600 font-sans italic">
+                          No matching SKUs found
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  return filtered.map((item) => {
+                    const statusClass = item.isBelowLimit
+                      ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                      : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+
+                    return (
+                      <tr key={item.sku} className={`hover:bg-slate-850/20 transition-colors ${item.isBelowLimit ? 'bg-rose-950/5' : ''}`}>
+                        <td className="py-3 px-3 font-bold text-slate-200">{item.sku}</td>
+                        <td className="py-3 px-3 text-slate-355">{item.size}</td>
+                        <td className="py-3 px-3 text-slate-500 font-sans">{item.customer}</td>
+                        <td className="py-3 px-3 text-center">
+                          <span className={`px-2.5 py-1 rounded-lg font-bold text-sm ${
+                            item.isBelowLimit 
+                              ? 'text-rose-450 bg-rose-500/5' 
+                              : 'text-slate-200'
+                          }`}>
+                            {item.count}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          <div className="flex items-center justify-center gap-1 font-sans">
+                            <input
+                              type="number"
+                              min="0"
+                              max="999"
+                              value={item.minLimit}
+                              onChange={(e) => handleUpdateThreshold(item.sku, Math.max(0, parseInt(e.target.value) || 0))}
+                              className="w-16 bg-slate-950 border border-slate-850 focus:border-indigo-500 rounded-lg py-1 px-2 text-center text-xs font-bold text-slate-200 outline-none"
+                            />
+                          </div>
+                        </td>
+                        <td className="py-3 px-3 text-right">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${statusClass}`}>
+                            <span className={`h-1 w-1 rounded-full ${item.isBelowLimit ? 'bg-rose-400 animate-pulse' : 'bg-emerald-400'}`}></span>
+                            <span>{item.isBelowLimit ? 'Below Safety Min' : 'Healthy'}</span>
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  });
+                })()}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Status Filter Cards */}
       <div className="mb-6 bg-slate-900/40 p-4 rounded-xl border border-slate-800/50">
