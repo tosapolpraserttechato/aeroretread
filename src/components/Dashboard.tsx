@@ -92,8 +92,16 @@ export default function Dashboard() {
         processedRow["STAT"] = derivedStat;
       }
 
+      // Find actual reason in the row if present under common names
+      const reasonKey = Object.keys(processedRow).find(k => 
+        ["REASON", "REJECT_REASON", "HOLD_REASON", "DEFECT_REASON", "COMMENT", "REMARKS", "DISPOSITION", "HOLD_REJECT_REASON"].includes(k.toUpperCase())
+      );
+      if (reasonKey && processedRow[reasonKey]) {
+        processedRow["HOLD_REJECT_REASON"] = processedRow[reasonKey];
+      }
+
       // Assign quality failure reason for Hold or Reject
-      if (!processedRow["HOLD_REJECT_REASON"]) {
+      if (!processedRow["HOLD_REJECT_REASON"] || String(processedRow["HOLD_REJECT_REASON"]).trim() === "") {
         const stat = processedRow["STAT"];
         if (stat === "H") {
           const holdReasons = ["Tread Lift", "Undercook", "Ply Separation", "Loose Cord", "Bead Damage"];
