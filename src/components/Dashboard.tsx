@@ -96,22 +96,10 @@ export default function Dashboard() {
       const reasonKey = Object.keys(processedRow).find(k => 
         ["REASON", "REJECT_REASON", "HOLD_REASON", "DEFECT_REASON", "COMMENT", "REMARKS", "DISPOSITION", "HOLD_REJECT_REASON"].includes(k.toUpperCase())
       );
-      if (reasonKey && processedRow[reasonKey]) {
-        processedRow["HOLD_REJECT_REASON"] = processedRow[reasonKey];
-      }
-
-      // Assign quality failure reason for Hold or Reject
-      if (!processedRow["HOLD_REJECT_REASON"] || String(processedRow["HOLD_REJECT_REASON"]).trim() === "") {
-        const stat = processedRow["STAT"];
-        if (stat === "H") {
-          const holdReasons = ["Tread Lift", "Undercook", "Ply Separation", "Loose Cord", "Bead Damage"];
-          processedRow["HOLD_REJECT_REASON"] = holdReasons[idx % holdReasons.length];
-        } else if (stat === "J") {
-          const rejectReasons = ["Excessive Ply Exposure", "Casing Fatigue", "Internal Liner Damage", "Bead Distortion", "Severe Crack"];
-          processedRow["HOLD_REJECT_REASON"] = rejectReasons[idx % rejectReasons.length];
-        } else {
-          processedRow["HOLD_REJECT_REASON"] = "N/A";
-        }
+      if (reasonKey && processedRow[reasonKey] !== undefined && processedRow[reasonKey] !== null && String(processedRow[reasonKey]).trim() !== "") {
+        processedRow["HOLD_REJECT_REASON"] = String(processedRow[reasonKey]).trim();
+      } else {
+        processedRow["HOLD_REJECT_REASON"] = "N/A";
       }
 
       // 5. Calculate or simulate Days in Process
@@ -1189,10 +1177,20 @@ export default function Dashboard() {
           </div>
 
           {/* Quality Gate Failures Pareto */}
-          {selectedOrders.filter(row => row.STAT === 'H' || row.STAT === 'J').length > 0 && (
+          {selectedOrders.filter(row => 
+            (row.STAT === 'H' || row.STAT === 'J') && 
+            row.HOLD_REJECT_REASON && 
+            row.HOLD_REJECT_REASON !== 'N/A' && 
+            String(row.HOLD_REJECT_REASON).trim() !== ''
+          ).length > 0 ? (
             <div className="mt-4 mb-8">
               <ParetoChart 
-                data={selectedOrders.filter(row => row.STAT === 'H' || row.STAT === 'J')} 
+                data={selectedOrders.filter(row => 
+                  (row.STAT === 'H' || row.STAT === 'J') && 
+                  row.HOLD_REJECT_REASON && 
+                  row.HOLD_REJECT_REASON !== 'N/A' && 
+                  String(row.HOLD_REJECT_REASON).trim() !== ''
+                )} 
                 title="Quality Gate Failure Pareto Chart (Hold / Reject Reasons)" 
                 dataKey="HOLD_REJECT_REASON" 
                 nameKey="name" 
@@ -1204,6 +1202,12 @@ export default function Dashboard() {
                 }}
               />
             </div>
+          ) : (
+            selectedOrders.some(row => row.STAT === 'H' || row.STAT === 'J') && (
+              <div className="mt-4 mb-8 bg-slate-900/50 border border-slate-800 rounded-xl p-5 text-center text-slate-500 text-xs italic">
+                No quality failure reasons specified for hold/reject tires in the current active dataset.
+              </div>
+            )
           )}
 
           {/* Order Details Table */}
