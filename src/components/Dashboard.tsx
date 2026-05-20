@@ -161,6 +161,46 @@ export default function Dashboard() {
     }
   });
 
+  const DEFAULT_WIP_LIMITS: Record<string, number> = {
+    INI: 15,
+    HO1: 10,
+    HOT: 15,
+    'Q-H': 8,
+    BUF: 10,
+    REP: 12,
+    'Q-R': 8,
+    BLD: 10,
+    ORB: 12,
+    'Q-O': 8,
+    CUR: 15,
+    'Q-C': 8,
+    HO2: 10,
+    INJ: 8,
+    FIN: 15,
+    'Q-F': 8
+  };
+
+  const [wipLimits, setWipLimits] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem('retread_wip_limits');
+      return saved ? JSON.parse(saved) : DEFAULT_WIP_LIMITS;
+    } catch (e) {
+      console.error(e);
+      return DEFAULT_WIP_LIMITS;
+    }
+  });
+
+  const [showLimitSettings, setShowLimitSettings] = useState<boolean>(false);
+
+  const updateWipLimit = (proc: string, value: number) => {
+    const sanitizedVal = Math.max(1, isNaN(value) ? 1 : value);
+    setWipLimits(prev => {
+      const next = { ...prev, [proc]: sanitizedVal };
+      localStorage.setItem('retread_wip_limits', JSON.stringify(next));
+      return next;
+    });
+  };
+
   const [selectedLogIndex, setSelectedLogIndex] = useState<number>(0);
   const data = dailyLogs[selectedLogIndex]?.data || [];
 
@@ -472,24 +512,7 @@ export default function Dashboard() {
 
   const totalInventory = processInventory.reduce((acc, curr) => acc + curr.C + curr.R + curr.I + curr.T + curr.J + curr.H, 0);
 
-  const WIP_LIMITS: Record<string, number> = {
-    INI: 15,
-    HO1: 10,
-    HOT: 15,
-    'Q-H': 8,
-    BUF: 10,
-    REP: 12,
-    'Q-R': 8,
-    BLD: 10,
-    ORB: 12,
-    'Q-O': 8,
-    CUR: 15,
-    'Q-C': 8,
-    HO2: 10,
-    INJ: 8,
-    FIN: 15,
-    'Q-F': 8
-  };
+  const WIP_LIMITS = wipLimits;
 
   const bottlenecks = React.useMemo(() => {
     return processInventory.filter(p => {
@@ -625,7 +648,7 @@ export default function Dashboard() {
             Load Sample History
           </button>
 
-          {dailyLogs.length > 0 && (
+           {dailyLogs.length > 0 && (
             <button
               onClick={handleClearAllData}
               className="flex items-center gap-2 bg-red-950/20 hover:bg-red-950/40 text-red-400 px-4 py-2 rounded-xl text-sm font-semibold border border-red-900/30 transition-colors"
@@ -633,6 +656,18 @@ export default function Dashboard() {
               Clear Data
             </button>
           )}
+
+          <button
+            onClick={() => setShowLimitSettings(!showLimitSettings)}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border transition-all cursor-pointer ${
+              showLimitSettings
+                ? 'bg-indigo-600 text-white border-indigo-500 shadow-md shadow-indigo-500/25'
+                : 'bg-slate-850 hover:bg-slate-800 text-slate-300 border-slate-750'
+            }`}
+          >
+            <Sliders size={16} />
+            Configure Limits
+          </button>
           
           {dailyLogs.length > 0 && (
             <div className="flex items-center gap-2 ml-2">
@@ -650,6 +685,59 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+
+      {/* WIP Limits Configuration Panel */}
+      {showLimitSettings && (
+        <div className="bg-slate-900/90 rounded-2xl border border-indigo-950/30 shadow-xl overflow-hidden p-6 mb-8 animate-fade-in">
+          <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-850">
+            <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+              <Sliders size={18} className="text-indigo-400" />
+              Configure Target Capacity Levels (WIP Limits)
+            </h3>
+            <button
+              onClick={() => setWipLimits(DEFAULT_WIP_LIMITS)}
+              className="text-xs font-semibold text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 px-3 py-1.5 rounded-lg border border-indigo-550/20 transition-colors cursor-pointer"
+            >
+              Reset to Defaults
+            </button>
+          </div>
+          <p className="text-xs text-slate-450 mb-6 leading-relaxed">
+            Set the maximum target Work-In-Process (WIP) threshold for each production station. 
+            Stations exceeding these values will trigger bottleneck alerts and blink red on the interactive flow map.
+          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-5">
+            {processHeaders.map((key) => {
+              const label = PROCESS_NAMES[key] || key;
+              const limitVal = wipLimits[key] || 999;
+              return (
+                <div key={key} className="bg-slate-950/50 p-3 rounded-xl border border-slate-850 shadow-inner flex flex-col gap-2.5">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-extrabold text-slate-200" title={label}>{key}</span>
+                    <input 
+                      type="number"
+                      min={1}
+                      value={limitVal}
+                      onChange={(e) => updateWipLimit(key, parseInt(e.target.value) || 1)}
+                      className="w-12 text-right bg-slate-900 border border-slate-800 rounded px-1.5 py-0.5 text-xs text-indigo-400 font-bold focus:border-indigo-500 outline-none"
+                    />
+                  </div>
+                  <input
+                    type="range"
+                    min={1}
+                    max={50}
+                    value={limitVal}
+                    onChange={(e) => updateWipLimit(key, parseInt(e.target.value))}
+                    className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                  />
+                  <span className="text-[9px] text-slate-500 font-semibold truncate" title={label}>
+                    {label}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex border-b border-slate-800 mb-8 mt-2">
