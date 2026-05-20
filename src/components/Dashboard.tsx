@@ -251,8 +251,25 @@ export default function Dashboard() {
   const [searchBarcode, setSearchBarcode] = useState<string>('');
   const trackerResults = React.useMemo(() => {
     if (!searchBarcode) return [];
+    const query = searchBarcode.trim().toUpperCase();
     return dailyLogs.map(log => {
-      const tire = log.data.find(row => String(row.BARCODE || row.MATERIAL || '').toUpperCase() === searchBarcode.toUpperCase());
+      const tire = log.data.find(row => {
+        // Try exact match on common serial/barcode columns first
+        const idKeys = ['BARCODE', 'SER_NO', 'SERIAL', 'SERIAL_NO', 'SERIAL_NUMBER', 'TIRE_ID', 'TIRE_NO', 'TIRE_NUMBER', 'MATERIAL'];
+        for (const key of idKeys) {
+          if (row[key] !== undefined && row[key] !== null) {
+            if (String(row[key]).trim().toUpperCase() === query) {
+              return true;
+            }
+          }
+        }
+        // Fallback: Check all fields in the row
+        return Object.keys(row).some(key => {
+          const val = row[key];
+          if (val === undefined || val === null || typeof val === 'object') return false;
+          return String(val).trim().toUpperCase() === query;
+        });
+      });
       return {
         timestamp: log.timestamp,
         date: new Date(log.timestamp).toLocaleDateString() + ' ' + new Date(log.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
@@ -1685,45 +1702,68 @@ export default function Dashboard() {
                         </span>
                       </div>
                     </div>
-                    
                     <div className="bg-slate-950/50 rounded-xl border border-slate-800 p-4">
                       {res.tire ? (
-                        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                          <div className="flex items-center gap-3">
-                            <div className="p-2 bg-indigo-500/10 rounded-lg border border-indigo-500/20">
-                              <Activity size={16} className="text-indigo-400" />
+                        <div className="flex flex-col gap-4">
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                            <div className="flex items-center gap-3">
+                              <div className="p-2 bg-indigo-500/10 rounded-lg border border-indigo-500/20">
+                                <Activity size={16} className="text-indigo-400" />
+                              </div>
+                              <div>
+                                <div className="text-xs text-slate-500 font-semibold mb-0.5">Current Process</div>
+                                <div className="text-sm font-bold text-slate-200">{res.tire.CURRENT_PROCESS || 'N/A'}</div>
+                              </div>
                             </div>
+                            
+                            <div className="h-8 w-px bg-slate-800 hidden sm:block"></div>
+                            
                             <div>
-                              <div className="text-xs text-slate-500 font-semibold mb-0.5">Current Process</div>
-                              <div className="text-sm font-bold text-slate-200">{res.tire.CURRENT_PROCESS || 'N/A'}</div>
+                              <div className="text-xs text-slate-500 font-semibold mb-0.5">Status</div>
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase inline-block ${
+                                  res.tire.STAT === 'I' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                                  res.tire.STAT === 'H' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
+                                  res.tire.STAT === 'R' ? 'bg-amber-600/10 text-amber-500 border-amber-600/20' :
+                                  res.tire.STAT === 'T' ? 'bg-slate-350/10 text-slate-350 border-slate-300/20' :
+                                  res.tire.STAT === 'J' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                                  'bg-slate-800 text-slate-400 border-slate-700/50'
+                                }`}>
+                                {res.tire.STAT === 'I' ? 'In Process' :
+                                 res.tire.STAT === 'H' ? 'Hold' :
+                                 res.tire.STAT === 'R' ? 'Reprocess' :
+                                 res.tire.STAT === 'T' ? 'Tech' :
+                                 res.tire.STAT === 'J' ? 'Reject' : (res.tire.STAT || 'UNKNOWN')}
+                              </span>
+                            </div>
+
+                            <div className="h-8 w-px bg-slate-800 hidden sm:block"></div>
+
+                            <div>
+                              <div className="text-xs text-slate-500 font-semibold mb-0.5">Days in Process</div>
+                              <div className="text-sm font-mono text-slate-300">{res.tire.DAYS_IN_PROCESS || 0}</div>
                             </div>
                           </div>
-                          
-                          <div className="h-8 w-px bg-slate-800 hidden sm:block"></div>
-                          
-                          <div>
-                            <div className="text-xs text-slate-500 font-semibold mb-0.5">Status</div>
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase inline-block ${
-                                res.tire.STAT === 'I' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                                res.tire.STAT === 'H' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
-                                res.tire.STAT === 'R' ? 'bg-amber-600/10 text-amber-500 border-amber-600/20' :
-                                res.tire.STAT === 'T' ? 'bg-slate-350/10 text-slate-350 border-slate-300/20' :
-                                res.tire.STAT === 'J' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
-                                'bg-slate-800 text-slate-400 border-slate-700/50'
-                              }`}>
-                              {res.tire.STAT === 'I' ? 'In Process' :
-                               res.tire.STAT === 'H' ? 'Hold' :
-                               res.tire.STAT === 'R' ? 'Reprocess' :
-                               res.tire.STAT === 'T' ? 'Tech' :
-                               res.tire.STAT === 'J' ? 'Reject' : (res.tire.STAT || 'UNKNOWN')}
-                            </span>
-                          </div>
 
-                          <div className="h-8 w-px bg-slate-800 hidden sm:block"></div>
-
-                          <div>
-                            <div className="text-xs text-slate-500 font-semibold mb-0.5">Days in Process</div>
-                            <div className="text-sm font-mono text-slate-300">{res.tire.DAYS_IN_PROCESS || 0}</div>
+                          {/* Dynamic Metadata Details Grid */}
+                          <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-400 border-t border-slate-800/40 pt-3 mt-1 w-full">
+                            {Object.keys(res.tire)
+                              .filter(key => !['CURRENT_PROCESS', 'STAT', 'DAYS_IN_PROCESS', 'HOLD_REJECT_REASON', ...processHeaders].includes(key))
+                              .map(key => {
+                                const val = res.tire[key];
+                                if (val === undefined || val === null || String(val).trim() === '') return null;
+                                return (
+                                  <div key={key} className="flex gap-1.5">
+                                    <span className="text-slate-500 font-medium">{key}:</span>
+                                    <span className="text-slate-300 font-bold">{String(val)}</span>
+                                  </div>
+                                );
+                              })}
+                            {res.tire.HOLD_REJECT_REASON && res.tire.HOLD_REJECT_REASON !== 'N/A' && (
+                              <div className="flex gap-1.5 text-yellow-500 font-medium">
+                                <span>Defect Reason:</span>
+                                <span className="font-bold">{res.tire.HOLD_REJECT_REASON}</span>
+                              </div>
+                            )}
                           </div>
                         </div>
                       ) : (
