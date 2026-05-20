@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell, LabelList, LineChart, Line, AreaChart, Area } from 'recharts';
 import Papa from 'papaparse';
 import { retreadData } from '../data/retreadData';
-import { PROCESS_NAMES, processHeaders } from '../constants';
+import { PROCESS_NAMES, processHeaders, PROCESS_ICONS, PROCESS_COLORS } from '../constants';
 import ProcessFlow from './ProcessFlow';
 import ParetoChart from './ParetoChart';
 import { 
@@ -1122,8 +1122,23 @@ export default function Dashboard() {
           {/* Section Header */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
             <div>
-              <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
-                <Sliders size={20} className="text-indigo-400" />
+              <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2.5">
+                {(() => {
+                  if (selectedProcess) {
+                    const ProcIcon = PROCESS_ICONS[selectedProcess];
+                    const colorCfg = PROCESS_COLORS[selectedProcess];
+                    return (
+                      <span className={`p-1.5 rounded-lg ${colorCfg?.bg || 'bg-indigo-500/10'} ${colorCfg?.text || 'text-indigo-400'} border ${colorCfg?.border || 'border-indigo-500/20'} flex items-center justify-center`}>
+                        {ProcIcon ? <ProcIcon size={18} /> : <Sliders size={18} />}
+                      </span>
+                    );
+                  }
+                  return (
+                    <span className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 flex items-center justify-center">
+                      <Sliders size={18} />
+                    </span>
+                  );
+                })()}
                 {selectedProcess 
                   ? `Process Analytics: ${PROCESS_NAMES[selectedProcess]} (${selectedProcess})`
                   : 'Aging Tires Spotlight (All Stations)'
@@ -1440,9 +1455,17 @@ export default function Dashboard() {
                                   );
                                 })()
                               ) : isCurrentProcessField ? (
-                                <span className="px-2 py-1 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 font-semibold text-xs whitespace-nowrap">
-                                  {cellVal}
-                                </span>
+                                (() => {
+                                  const procKey = Object.keys(PROCESS_NAMES).find(k => PROCESS_NAMES[k] === cellVal);
+                                  const ProcIcon = procKey ? PROCESS_ICONS[procKey] : null;
+                                  const colorCfg = procKey ? PROCESS_COLORS[procKey] : null;
+                                  return (
+                                    <span className={`px-2 py-1 rounded-lg ${colorCfg?.bg || 'bg-indigo-500/10'} ${colorCfg?.text || 'text-indigo-300'} border ${colorCfg?.border || 'border-indigo-500/20'} font-semibold text-xs whitespace-nowrap inline-flex items-center gap-1.5`}>
+                                      {ProcIcon && <ProcIcon size={12} className="stroke-[2.25]" />}
+                                      <span>{cellVal}</span>
+                                    </span>
+                                  );
+                                })()
                               ) : isWorkOrderField ? (
                                 <button
                                   onClick={(e) => {
@@ -1674,9 +1697,17 @@ export default function Dashboard() {
                   const label = PROCESS_NAMES[key] || key;
                   return (
                   <div key={key} className="bg-slate-900/90 rounded-2xl border border-slate-800 shadow-xl overflow-hidden p-5 transition-transform hover:-translate-y-1 duration-300">
-                    <h4 className="text-sm font-bold text-slate-100 flex items-center gap-2 mb-4">
-                      <div className="w-2.5 h-2.5 rounded-full shadow-sm" style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}` }}></div>
-                      {label} Trend
+                    <h4 className="text-sm font-bold text-slate-100 flex items-center gap-2.5 mb-4">
+                      {(() => {
+                        const ProcIcon = PROCESS_ICONS[key];
+                        const colorCfg = PROCESS_COLORS[key];
+                        return (
+                          <span className={`p-1 rounded-lg bg-slate-950 ${colorCfg?.text || 'text-slate-400'} border ${colorCfg?.border || 'border-slate-850'} flex items-center justify-center shadow-inner`}>
+                            {ProcIcon ? <ProcIcon size={14} className="stroke-[2]" /> : <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />}
+                          </span>
+                        );
+                      })()}
+                      <span>{label} Trend</span>
                     </h4>
                     <div className="h-48">
                       <ResponsiveContainer width="100%" height="100%">
@@ -1748,15 +1779,23 @@ export default function Dashboard() {
                       {res.tire ? (
                         <div className="flex flex-col gap-4">
                           <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                            <div className="flex items-center gap-3">
-                              <div className="p-2 bg-indigo-500/10 rounded-lg border border-indigo-500/20">
-                                <Activity size={16} className="text-indigo-400" />
-                              </div>
-                              <div>
-                                <div className="text-xs text-slate-500 font-semibold mb-0.5">Current Process</div>
-                                <div className="text-sm font-bold text-slate-200">{res.tire.CURRENT_PROCESS || 'N/A'}</div>
-                              </div>
-                            </div>
+                             {(() => {
+                              const procVal = res.tire.CURRENT_PROCESS;
+                              const procKey = Object.keys(PROCESS_NAMES).find(k => PROCESS_NAMES[k] === procVal);
+                              const ProcIcon = procKey ? PROCESS_ICONS[procKey] : Activity;
+                              const colorCfg = procKey ? PROCESS_COLORS[procKey] : { text: 'text-indigo-400', bg: 'bg-indigo-500/10', border: 'border-indigo-500/20' };
+                              return (
+                                <div className="flex items-center gap-3">
+                                  <div className={`p-2 ${colorCfg.bg} rounded-lg border ${colorCfg.border} ${colorCfg.text}`}>
+                                    <ProcIcon size={16} className="stroke-[2.25]" />
+                                  </div>
+                                  <div>
+                                    <div className="text-xs text-slate-500 font-semibold mb-0.5">Current Process</div>
+                                    <div className="text-sm font-bold text-slate-200">{procVal || 'N/A'}</div>
+                                  </div>
+                                </div>
+                              );
+                            })()}
                             
                             <div className="h-8 w-px bg-slate-800 hidden sm:block"></div>
                             
