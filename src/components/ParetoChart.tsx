@@ -6,9 +6,10 @@ interface ParetoChartProps {
   dataKey: string;
   nameKey: string;
   limit?: number;
+  onBarClick?: (value: string) => void;
 }
 
-export default function ParetoChart({ data, title, dataKey, nameKey, limit }: ParetoChartProps) {
+export default function ParetoChart({ data, title, dataKey, nameKey, limit, onBarClick }: ParetoChartProps) {
   if (data.length === 0) return null;
 
   const counts: Record<string, number> = {};
@@ -51,7 +52,18 @@ export default function ParetoChart({ data, title, dataKey, nameKey, limit }: Pa
             ]}
           />
           <Legend verticalAlign="bottom" height={36} wrapperStyle={{ paddingTop: '20px', color: '#94a3b8' }} />
-          <Bar yAxisId="left" dataKey="count" fill="#6366f1" name="Frequency" />
+          <Bar 
+            yAxisId="left" 
+            dataKey="count" 
+            fill="#6366f1" 
+            name="Frequency" 
+            onClick={(data) => {
+              if (onBarClick && data && data.name) {
+                onBarClick(data.name);
+              }
+            }}
+            cursor={onBarClick ? "pointer" : "default"}
+          />
           <Line yAxisId="right" type="monotone" dataKey="cumulativePercentage" stroke="#f59e0b" name="Cumulative %" />
         </ComposedChart>
       </ResponsiveContainer>
