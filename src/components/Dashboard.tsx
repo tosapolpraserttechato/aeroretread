@@ -245,13 +245,15 @@ export default function Dashboard() {
   };
 
   const [searchBarcode, setSearchBarcode] = useState<string>('');
-  const trackerResults = React.useMemo(() => {
-    if (!searchBarcode) return [];
-    const query = searchBarcode.trim().toUpperCase();
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+
+  const getTireHistory = React.useCallback((queryStr: string) => {
+    if (!queryStr) return [];
+    const query = queryStr.trim().toUpperCase();
     return dailyLogs.map(log => {
       const tire = log.data.find(row => {
-        // Try exact match on common serial/barcode columns first
-        const idKeys = ['BARCODE', 'SER_NO', 'SERIAL', 'SERIAL_NO', 'SERIAL_NUMBER', 'TIRE_ID', 'TIRE_NO', 'TIRE_NUMBER', 'MATERIAL'];
+        // Try exact match on common serial/barcode/workorder columns first
+        const idKeys = ['BARCODE', 'SER_NO', 'SERIAL', 'SERIAL_NO', 'SERIAL_NUMBER', 'TIRE_ID', 'TIRE_NO', 'TIRE_NUMBER', 'MATERIAL', 'WORK_ORDER', 'WORK ORDER', 'WO'];
         for (const key of idKeys) {
           if (row[key] !== undefined && row[key] !== null) {
             if (String(row[key]).trim().toUpperCase() === query) {
@@ -273,7 +275,11 @@ export default function Dashboard() {
         tire: tire || null
       };
     }).sort((a, b) => a.timestamp - b.timestamp);
-  }, [searchBarcode, dailyLogs]);
+  }, [dailyLogs]);
+
+  const trackerResults = React.useMemo(() => {
+    return getTireHistory(searchBarcode);
+  }, [searchBarcode, getTireHistory]);
 
   const [selectedProcess, setSelectedProcess] = useState<string | null>(null);
   const [tableViewMode, setTableViewMode] = useState<'summary' | 'matrix'>('summary');
@@ -281,7 +287,7 @@ export default function Dashboard() {
   const getTableHeaders = (sampleRow: any) => {
     if (!sampleRow) return [];
     if (tableViewMode === 'summary') {
-      const coreKeys = ['MATERIAL', 'SIZE', 'CUSTOMER', 'AIRLINE', 'CURRENT_PROCESS', 'DAYS_IN_PROCESS', 'STAT'];
+      const coreKeys = ['BARCODE', 'WORK_ORDER', 'WORK ORDER', 'MATERIAL', 'SIZE', 'CUSTOMER', 'AIRLINE', 'CURRENT_PROCESS', 'DAYS_IN_PROCESS', 'STAT'];
       return coreKeys.filter(key => key in sampleRow);
     } else {
       return Object.keys(sampleRow).filter(k => k !== 'CURRENT_PROCESS');
@@ -1381,70 +1387,222 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-850">
-                  {paginatedOrders.map((order, idx) => (
-                    <tr key={idx} className="hover:bg-slate-850/40 transition-colors">
-                      {getTableHeaders(order).map(header => {
-                        const cellVal = String(order[header]);
-                        const isStatField = header.toUpperCase() === 'STAT';
-                        const isDaysField = header === 'DAYS_IN_PROCESS';
-                        const isCurrentProcessField = header === 'CURRENT_PROCESS';
-                        return (
-                          <td key={header} className="py-3 px-4 font-mono text-slate-355">
-                            {isStatField ? (
-                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase ${
-                                cellVal === 'I' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                                cellVal === 'H' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
-                                cellVal === 'R' ? 'bg-amber-600/10 text-amber-500 border-amber-600/20' :
-                                cellVal === 'T' ? 'bg-slate-350/10 text-slate-350 border-slate-300/20' :
-                                cellVal === 'J' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
-                                'bg-slate-800 text-slate-400 border-slate-700/50'
-                              }`}>
-                                {cellVal === 'I' ? 'In Process' :
-                                 cellVal === 'H' ? 'Hold' :
-                                 cellVal === 'R' ? 'Reprocess' :
-                                 cellVal === 'T' ? 'Tech' :
-                                 cellVal === 'J' ? 'Reject' : cellVal}
-                              </span>
-                            ) : isDaysField ? (
-                              (() => {
-                                const daysNum = parseInt(cellVal) || 0;
-                                let colorClass = "";
-                                let dotColor = "";
-                                if (daysNum <= 4) {
-                                  colorClass = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
-                                  dotColor = "bg-emerald-400";
-                                } else if (daysNum <= 8) {
-                                  colorClass = "bg-amber-500/10 text-amber-400 border-amber-500/20";
-                                  dotColor = "bg-amber-400";
-                                } else {
-                                  colorClass = "bg-rose-500/10 text-rose-400 border-rose-500/20";
-                                  dotColor = "bg-rose-500";
-                                }
-                                return (
-                                  <span className={`px-2.5 py-1 rounded-lg text-xs font-bold border inline-flex items-center gap-1.5 ${colorClass}`}>
-                                    <span className={`h-1.5 w-1.5 rounded-full ${dotColor}`}></span>
-                                    {daysNum} {daysNum === 1 ? 'Day' : 'Days'}
+                  {paginatedOrders.map((order, idx) => {
+                    const tireId = String(order.BARCODE || order.WORK_ORDER || order['WORK ORDER'] || order.MATERIAL || '');
+                    const isExpanded = expandedOrderId === tireId;
+                    const headers = getTableHeaders(order);
+
+                    return (
+                      <React.Fragment key={idx}>
+                        <tr className={`hover:bg-slate-850/40 transition-colors ${isExpanded ? 'bg-indigo-950/10' : ''}`}>
+                          {headers.map(header => {
+                            const cellVal = String(order[header]);
+                            const isStatField = header.toUpperCase() === 'STAT';
+                            const isDaysField = header === 'DAYS_IN_PROCESS';
+                            const isCurrentProcessField = header === 'CURRENT_PROCESS';
+                            const isWorkOrderField = ['WORK_ORDER', 'WORK ORDER', 'BARCODE'].includes(header.toUpperCase());
+
+                            return (
+                              <td key={header} className="py-3 px-4 font-mono text-slate-355">
+                                {isStatField ? (
+                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase ${
+                                    cellVal === 'I' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                                    cellVal === 'H' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
+                                    cellVal === 'R' ? 'bg-amber-600/10 text-amber-500 border-amber-600/20' :
+                                    cellVal === 'T' ? 'bg-slate-350/10 text-slate-350 border-slate-300/20' :
+                                    cellVal === 'J' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                                    'bg-slate-800 text-slate-400 border-slate-700/50'
+                                  }`}>
+                                    {cellVal === 'I' ? 'In Process' :
+                                     cellVal === 'H' ? 'Hold' :
+                                     cellVal === 'R' ? 'Reprocess' :
+                                     cellVal === 'T' ? 'Tech' :
+                                     cellVal === 'J' ? 'Reject' : cellVal}
                                   </span>
-                                );
-                              })()
-                            ) : isCurrentProcessField ? (
-                              <span className="px-2 py-1 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 font-semibold text-xs whitespace-nowrap">
-                                {cellVal}
-                              </span>
-                            ) : header === 'HOLD_REJECT_REASON' ? (
-                              cellVal === 'N/A' ? (
-                                <span className="text-slate-650 font-medium font-sans">N/A</span>
-                              ) : (
-                                <span className="px-2.5 py-0.5 rounded bg-rose-500/10 text-rose-300 border border-rose-500/20 font-bold text-xs whitespace-nowrap">
-                                  {cellVal}
-                                </span>
-                              )
-                            ) : cellVal || '-'}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
+                                ) : isDaysField ? (
+                                  (() => {
+                                    const daysNum = parseInt(cellVal) || 0;
+                                    let colorClass = "";
+                                    let dotColor = "";
+                                    if (daysNum <= 4) {
+                                      colorClass = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+                                      dotColor = "bg-emerald-400";
+                                    } else if (daysNum <= 8) {
+                                      colorClass = "bg-amber-500/10 text-amber-400 border-amber-500/20";
+                                      dotColor = "bg-amber-400";
+                                    } else {
+                                      colorClass = "bg-rose-500/10 text-rose-400 border-rose-500/20";
+                                      dotColor = "bg-rose-500";
+                                    }
+                                    return (
+                                      <span className={`px-2.5 py-1 rounded-lg text-xs font-bold border inline-flex items-center gap-1.5 ${colorClass}`}>
+                                        <span className={`h-1.5 w-1.5 rounded-full ${dotColor}`}></span>
+                                        {daysNum} {daysNum === 1 ? 'Day' : 'Days'}
+                                      </span>
+                                    );
+                                  })()
+                                ) : isCurrentProcessField ? (
+                                  <span className="px-2 py-1 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 font-semibold text-xs whitespace-nowrap">
+                                    {cellVal}
+                                  </span>
+                                ) : isWorkOrderField ? (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (tireId) {
+                                        setExpandedOrderId(prev => prev === tireId ? null : tireId);
+                                      }
+                                    }}
+                                    className="text-indigo-400 hover:text-indigo-350 font-bold hover:underline cursor-pointer flex items-center gap-1.5 text-left outline-none"
+                                    title="Click to view history timeline for this tire"
+                                  >
+                                    <History size={12} className="opacity-70 shrink-0 text-indigo-400" />
+                                    <span>{cellVal}</span>
+                                  </button>
+                                ) : header === 'HOLD_REJECT_REASON' ? (
+                                  cellVal === 'N/A' ? (
+                                    <span className="text-slate-655 font-medium font-sans">N/A</span>
+                                  ) : (
+                                    <span className="px-2.5 py-0.5 rounded bg-rose-500/10 text-rose-300 border border-rose-500/20 font-bold text-xs whitespace-nowrap">
+                                      {cellVal}
+                                    </span>
+                                  )
+                                ) : cellVal || '-'}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                        
+                        {isExpanded && (
+                          <tr className="bg-slate-950/60">
+                            <td colSpan={headers.length} className="p-4 border-l-2 border-indigo-500">
+                              <div className="bg-slate-900/80 rounded-xl border border-slate-800 p-5 shadow-inner">
+                                <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-800/60">
+                                  <div className="flex items-center gap-2">
+                                    <History size={16} className="text-indigo-455 animate-pulse" />
+                                    <h4 className="font-bold text-slate-200 text-sm">
+                                      Tire Movement History: <span className="text-indigo-455 font-mono font-black">{tireId}</span>
+                                    </h4>
+                                  </div>
+                                  <button 
+                                    onClick={() => setExpandedOrderId(null)}
+                                    className="text-slate-400 hover:text-slate-200 text-xs font-semibold px-2 py-1 rounded bg-slate-950/60 border border-slate-800 hover:border-slate-700 transition-all cursor-pointer"
+                                  >
+                                    Close History
+                                  </button>
+                                </div>
+
+                                {/* Timeline Content */}
+                                {(() => {
+                                  const history = getTireHistory(tireId);
+                                  const foundAny = history.some(h => h.tire !== null);
+
+                                  if (!foundAny) {
+                                    return (
+                                      <div className="text-xs text-slate-500 italic py-3 text-center">
+                                        No historical tracking records found in the uploaded logs.
+                                      </div>
+                                    );
+                                  }
+
+                                  return (
+                                    <div className="relative pl-6 border-l-2 border-indigo-500/20 space-y-4 py-2">
+                                      {history.map((h, hIdx) => {
+                                        if (!h.tire) {
+                                          return (
+                                            <div key={hIdx} className="relative">
+                                              {/* Bullet */}
+                                              <div className="absolute -left-[31px] top-1.5 h-3 w-3 rounded-full border-2 border-slate-800 bg-slate-900 flex items-center justify-center">
+                                                <div className="h-1 w-1 rounded-full bg-slate-700"></div>
+                                              </div>
+                                              <div>
+                                                <div className="text-[10px] text-slate-500 font-semibold mb-0.5">{h.date} ({h.fileName})</div>
+                                                <div className="text-xs text-slate-600 italic">No entry/activity on this date.</div>
+                                              </div>
+                                            </div>
+                                          );
+                                        }
+
+                                        return (
+                                          <div key={hIdx} className="relative group">
+                                            {/* Bullet */}
+                                            <div className={`absolute -left-[32px] top-1.5 h-3.5 w-3.5 rounded-full border-2 bg-slate-950 flex items-center justify-center ${
+                                              h.tire.STAT === 'H' ? 'border-yellow-500/40 text-yellow-500' :
+                                              h.tire.STAT === 'J' ? 'border-red-500/40 text-red-500' :
+                                              h.tire.STAT === 'R' ? 'border-amber-500/40 text-amber-500' :
+                                              'border-indigo-500/40 text-indigo-400'
+                                            }`}>
+                                              <div className={`h-1.5 w-1.5 rounded-full ${
+                                                h.tire.STAT === 'H' ? 'bg-yellow-450' :
+                                                h.tire.STAT === 'J' ? 'bg-red-450' :
+                                                h.tire.STAT === 'R' ? 'bg-amber-450' :
+                                                'bg-indigo-455'
+                                              }`}></div>
+                                            </div>
+
+                                            <div className="flex flex-col gap-2 bg-slate-950/40 p-3 rounded-lg border border-slate-850/60 hover:border-slate-800/80 transition-all">
+                                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/40 pb-1.5">
+                                                <span className="text-[10px] text-slate-400 font-bold tracking-wider uppercase font-sans">
+                                                  {h.date} <span className="text-slate-600 font-normal">({h.fileName})</span>
+                                                </span>
+                                                <div className="flex items-center gap-2">
+                                                  <span className="text-[10px] font-semibold text-slate-500 font-sans">Process:</span>
+                                                  <span className="px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-[10px] font-bold">
+                                                    {h.tire.CURRENT_PROCESS || 'N/A'}
+                                                  </span>
+                                                  <span className="text-[10px] font-semibold text-slate-500 font-sans ml-1">Status:</span>
+                                                  <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold border uppercase ${
+                                                      h.tire.STAT === 'I' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                                                      h.tire.STAT === 'H' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
+                                                      h.tire.STAT === 'R' ? 'bg-amber-600/10 text-amber-500 border-amber-600/20' :
+                                                      h.tire.STAT === 'T' ? 'bg-slate-350/10 text-slate-350 border-slate-300/20' :
+                                                      h.tire.STAT === 'J' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                                                      'bg-slate-850 text-slate-400 border-slate-700/50'
+                                                    }`}>
+                                                    {h.tire.STAT === 'I' ? 'In Process' :
+                                                     h.tire.STAT === 'H' ? 'Hold' :
+                                                     h.tire.STAT === 'R' ? 'Reprocess' :
+                                                     h.tire.STAT === 'T' ? 'Tech' :
+                                                     h.tire.STAT === 'J' ? 'Reject' : (h.tire.STAT || 'UNKNOWN')}
+                                                  </span>
+                                                </div>
+                                              </div>
+
+                                              {/* Details metadata */}
+                                              <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-[10px] text-slate-400 mt-1">
+                                                {Object.keys(h.tire)
+                                                  .filter(key => !['CURRENT_PROCESS', 'STAT', 'DAYS_IN_PROCESS', 'HOLD_REJECT_REASON', ...processHeaders].includes(key))
+                                                  .map(key => {
+                                                    const val = h.tire[key];
+                                                    if (val === undefined || val === null || String(val).trim() === '') return null;
+                                                    return (
+                                                      <div key={key} className="flex gap-1">
+                                                        <span className="text-slate-500 font-medium">{key}:</span>
+                                                        <span className="text-slate-300 font-bold">{String(val)}</span>
+                                                      </div>
+                                                    );
+                                                  })}
+                                                {h.tire.HOLD_REJECT_REASON && h.tire.HOLD_REJECT_REASON !== 'N/A' && (
+                                                  <div className="flex gap-1 text-yellow-500 font-semibold">
+                                                    <span>Reason:</span>
+                                                    <span className="font-bold">{h.tire.HOLD_REJECT_REASON}</span>
+                                                  </div>
+                                                )}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  );
+                                })()}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
