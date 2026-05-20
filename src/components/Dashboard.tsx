@@ -8,7 +8,7 @@ import ParetoChart from './ParetoChart';
 import { 
   Upload, Sparkles, Filter, Eye, EyeOff, Sliders, 
   BarChart2, ShieldAlert, CheckCircle2, AlertTriangle, 
-  Clock, ArrowRight, Table, ChevronDown, RefreshCw, Layers, Info, Search, Download, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, History, Activity, TrendingUp
+  Clock, ArrowRight, Table, ChevronDown, RefreshCw, Layers, Info, Search, Download, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, History, Activity, TrendingUp, Grid, List
 } from 'lucide-react';
 
 export interface DailyLog {
@@ -295,6 +295,7 @@ export default function Dashboard() {
   });
   const [showHotHouseSkus, setShowHotHouseSkus] = useState<boolean>(false);
   const [hotHouseSkuSearch, setHotHouseSkuSearch] = useState<string>('');
+  const [hotHouseViewMode, setHotHouseViewMode] = useState<'table' | 'heatmap'>('heatmap');
 
   const handleUpdateThreshold = (sku: string, value: number) => {
     const updated = { ...skuMinThresholds, [sku]: value };
@@ -910,7 +911,35 @@ export default function Dashboard() {
               </p>
             </div>
             
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+              {/* View Toggle */}
+              <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-850 text-xs mr-2">
+                <button
+                  type="button"
+                  onClick={() => setHotHouseViewMode('heatmap')}
+                  className={`px-3 py-1.5 rounded-lg font-bold transition-all duration-200 flex items-center gap-1.5 cursor-pointer ${
+                    hotHouseViewMode === 'heatmap'
+                      ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
+                      : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                  }`}
+                >
+                  <Grid size={13} />
+                  <span>Heatmap Grid</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHotHouseViewMode('table')}
+                  className={`px-3 py-1.5 rounded-lg font-bold transition-all duration-200 flex items-center gap-1.5 cursor-pointer ${
+                    hotHouseViewMode === 'table'
+                      ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
+                      : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                  }`}
+                >
+                  <List size={13} />
+                  <span>Table List</span>
+                </button>
+              </div>
+
               <div className="relative">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                 <input
@@ -932,83 +961,198 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* SKU Inventory Table */}
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-slate-400">
-              <thead>
-                <tr className="text-[10px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-850 pb-2">
-                  <th className="py-2.5 px-3">SKU (Material ID)</th>
-                  <th className="py-2.5 px-3">Tire Size</th>
-                  <th className="py-2.5 px-3">Main Customer</th>
-                  <th className="py-2.5 px-3 text-center">Current Qty (In Hot House)</th>
-                  <th className="py-2.5 px-3 text-center">Min Safety Limit</th>
-                  <th className="py-2.5 px-3 text-right">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-850/60 font-mono">
-                {(() => {
-                  const filtered = hotHouseSkuInventory.filter(item => {
-                    if (!hotHouseSkuSearch) return true;
-                    const search = hotHouseSkuSearch.toLowerCase();
-                    return item.sku.toLowerCase().includes(search) || 
-                           item.size.toLowerCase().includes(search) ||
-                           item.customer.toLowerCase().includes(search);
-                  });
+          {hotHouseViewMode === 'table' ? (
+            /* SKU Inventory Table View */
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-400 font-mono">
+                <thead>
+                  <tr className="text-[10px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-850 pb-2">
+                    <th className="py-2.5 px-3">SKU (Material ID)</th>
+                    <th className="py-2.5 px-3">Tire Size</th>
+                    <th className="py-2.5 px-3">Main Customer</th>
+                    <th className="py-2.5 px-3 text-center">Current Qty (In Hot House)</th>
+                    <th className="py-2.5 px-3 text-center">Min Safety Limit</th>
+                    <th className="py-2.5 px-3 text-right">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-850/60">
+                  {(() => {
+                    const filtered = hotHouseSkuInventory.filter(item => {
+                      if (!hotHouseSkuSearch) return true;
+                      const search = hotHouseSkuSearch.toLowerCase();
+                      return item.sku.toLowerCase().includes(search) || 
+                             item.size.toLowerCase().includes(search) ||
+                             item.customer.toLowerCase().includes(search);
+                    });
 
-                  if (filtered.length === 0) {
-                    return (
-                      <tr>
-                        <td colSpan={6} className="py-8 text-center text-slate-600 font-sans italic">
-                          No matching SKUs found
-                        </td>
-                      </tr>
-                    );
+                    if (filtered.length === 0) {
+                      return (
+                        <tr>
+                          <td colSpan={6} className="py-8 text-center text-slate-600 font-sans italic">
+                            No matching SKUs found
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    return filtered.map((item) => {
+                      const statusClass = item.isBelowLimit
+                        ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                        : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+
+                      return (
+                        <tr key={item.sku} className={`hover:bg-slate-850/20 transition-colors ${item.isBelowLimit ? 'bg-rose-950/5' : ''}`}>
+                          <td className="py-3 px-3 font-bold text-slate-200">{item.sku}</td>
+                          <td className="py-3 px-3 text-slate-355">{item.size}</td>
+                          <td className="py-3 px-3 text-slate-500 font-sans">{item.customer}</td>
+                          <td className="py-3 px-3 text-center font-sans">
+                            <span className={`px-2.5 py-1 rounded-lg font-bold text-sm ${
+                              item.isBelowLimit 
+                                ? 'text-rose-450 bg-rose-500/5' 
+                                : 'text-slate-200'
+                            }`}>
+                              {item.count}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-center font-sans">
+                            <div className="flex items-center justify-center gap-1">
+                              <input
+                                type="number"
+                                min="0"
+                                max="999"
+                                value={item.minLimit}
+                                onChange={(e) => handleUpdateThreshold(item.sku, Math.max(0, parseInt(e.target.value) || 0))}
+                                className="w-16 bg-slate-950 border border-slate-850 focus:border-indigo-500 rounded-lg py-1 px-2 text-center text-xs font-bold text-slate-200 outline-none"
+                              />
+                            </div>
+                          </td>
+                          <td className="py-3 px-3 text-right">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${statusClass}`}>
+                              <span className={`h-1.5 w-1.5 rounded-full ${item.isBelowLimit ? 'bg-rose-400 animate-pulse' : 'bg-emerald-400'}`}></span>
+                              <span>{item.isBelowLimit ? 'Below Safety Min' : 'Healthy'}</span>
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })()}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            /* SKU Inventory Heatmap Grid View */
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+              {(() => {
+                const filtered = hotHouseSkuInventory.filter(item => {
+                  if (!hotHouseSkuSearch) return true;
+                  const search = hotHouseSkuSearch.toLowerCase();
+                  return item.sku.toLowerCase().includes(search) || 
+                         item.size.toLowerCase().includes(search) ||
+                         item.customer.toLowerCase().includes(search);
+                });
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="col-span-full py-8 text-center text-slate-650 font-sans italic">
+                      No matching SKUs found
+                    </div>
+                  );
+                }
+
+                return filtered.map((item) => {
+                  const isCritical = item.minLimit > 0 && item.count === 0;
+                  const isLow = item.isBelowLimit && !isCritical;
+                  const isWarning = item.minLimit > 0 && item.count === item.minLimit;
+                  const isHealthy = item.count > item.minLimit;
+
+                  let cardClass = '';
+                  let badgeClass = '';
+                  let dotClass = '';
+                  let statusText = '';
+
+                  if (isCritical) {
+                    cardClass = 'bg-rose-950/65 border-rose-500/80 text-rose-200 shadow-[0_0_15px_rgba(239,68,68,0.1)]';
+                    badgeClass = 'bg-rose-500/25 text-rose-400 border border-rose-500/30';
+                    dotClass = 'bg-rose-400';
+                    statusText = 'Critical Stockout';
+                  } else if (isLow) {
+                    cardClass = 'bg-amber-950/35 border-amber-600/70 text-amber-200';
+                    badgeClass = 'bg-amber-500/20 text-amber-400 border border-amber-500/30';
+                    dotClass = 'bg-amber-400';
+                    statusText = 'Low Inventory';
+                  } else if (isWarning) {
+                    cardClass = 'bg-yellow-950/15 border-yellow-600/50 text-yellow-100';
+                    badgeClass = 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20';
+                    dotClass = 'bg-yellow-500';
+                    statusText = 'At Safety Min';
+                  } else if (isHealthy) {
+                    cardClass = 'bg-emerald-950/20 border-emerald-600/40 text-emerald-250 hover:bg-emerald-950/30';
+                    badgeClass = 'bg-emerald-500/15 text-emerald-450 border border-emerald-500/20';
+                    dotClass = 'bg-emerald-450';
+                    statusText = 'Healthy stock';
+                  } else {
+                    cardClass = 'bg-slate-900/60 border-slate-800 text-slate-400';
+                    badgeClass = 'bg-slate-950 text-slate-400 border border-slate-800';
+                    dotClass = 'bg-slate-600';
+                    statusText = 'No Safety Limit';
                   }
 
-                  return filtered.map((item) => {
-                    const statusClass = item.isBelowLimit
-                      ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                      : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
-
-                    return (
-                      <tr key={item.sku} className={`hover:bg-slate-850/20 transition-colors ${item.isBelowLimit ? 'bg-rose-950/5' : ''}`}>
-                        <td className="py-3 px-3 font-bold text-slate-200">{item.sku}</td>
-                        <td className="py-3 px-3 text-slate-355">{item.size}</td>
-                        <td className="py-3 px-3 text-slate-500 font-sans">{item.customer}</td>
-                        <td className="py-3 px-3 text-center">
-                          <span className={`px-2.5 py-1 rounded-lg font-bold text-sm ${
-                            item.isBelowLimit 
-                              ? 'text-rose-450 bg-rose-500/5' 
-                              : 'text-slate-200'
-                          }`}>
+                  return (
+                    <div 
+                      key={item.sku} 
+                      className={`relative rounded-xl border p-4 flex flex-col justify-between transition-all duration-300 group shadow-md ${cardClass}`}
+                    >
+                      {/* Top: SKU and Qty */}
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <div className="min-w-0">
+                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">SKU</span>
+                          <span className="text-sm font-black tracking-tight text-slate-100 truncate block" title={item.sku}>
+                            {item.sku}
+                          </span>
+                        </div>
+                        <div className="flex flex-col items-end">
+                          <span className="text-[10px] font-bold text-slate-505 uppercase tracking-wider block">Qty</span>
+                          <span className={`px-2 py-0.5 rounded-lg text-xs font-black font-mono ${badgeClass}`}>
                             {item.count}
                           </span>
-                        </td>
-                        <td className="py-3 px-3 text-center">
-                          <div className="flex items-center justify-center gap-1 font-sans">
-                            <input
-                              type="number"
-                              min="0"
-                              max="999"
-                              value={item.minLimit}
-                              onChange={(e) => handleUpdateThreshold(item.sku, Math.max(0, parseInt(e.target.value) || 0))}
-                              className="w-16 bg-slate-950 border border-slate-850 focus:border-indigo-500 rounded-lg py-1 px-2 text-center text-xs font-bold text-slate-200 outline-none"
-                            />
-                          </div>
-                        </td>
-                        <td className="py-3 px-3 text-right">
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${statusClass}`}>
-                            <span className={`h-1 w-1 rounded-full ${item.isBelowLimit ? 'bg-rose-400 animate-pulse' : 'bg-emerald-400'}`}></span>
-                            <span>{item.isBelowLimit ? 'Below Safety Min' : 'Healthy'}</span>
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  });
-                })()}
-              </tbody>
-            </table>
-          </div>
+                        </div>
+                      </div>
+
+                      {/* Mid: Tire Size & Customer */}
+                      <div className="mb-4 min-w-0">
+                        <p className="text-[11px] text-slate-300 font-medium truncate" title={item.size}>
+                          {item.size}
+                        </p>
+                        <p className="text-[9px] text-slate-500 truncate" title={item.customer}>
+                          {item.customer}
+                        </p>
+                      </div>
+
+                      {/* Bottom: Threshold Input & Status */}
+                      <div className="pt-2 border-t border-slate-800/40 flex items-center justify-between gap-2 mt-auto">
+                        <div className="flex items-center gap-1 font-sans">
+                          <span className="text-[9px] text-slate-500 font-semibold uppercase">Min Limit:</span>
+                          <input
+                            type="number"
+                            min="0"
+                            max="999"
+                            value={item.minLimit}
+                            onChange={(e) => handleUpdateThreshold(item.sku, Math.max(0, parseInt(e.target.value) || 0))}
+                            className="w-11 bg-slate-950 border border-slate-850 focus:border-indigo-500 rounded py-0.5 px-1 text-center text-[10px] font-bold text-slate-200 outline-none"
+                          />
+                        </div>
+
+                        <span className="inline-flex items-center gap-1 text-[8px] font-extrabold uppercase tracking-wider">
+                          <span className={`h-1.5 w-1.5 rounded-full ${dotClass} ${isCritical || isLow ? 'animate-pulse' : ''}`}></span>
+                          <span>{statusText}</span>
+                        </span>
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+          )}
         </div>
       )}
 
