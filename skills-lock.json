@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "lean-manufacturing": {
+      "source": "kishorkukreja/awesome-supply-chain",
+      "sourceType": "github",
+      "skillPath": "skills/lean-manufacturing/SKILL.md",
+      "computedHash": "e73f579415ce751e4e6abf1d5265e56829e5f134374aaa94db70f532c53b5bce"
+    }
+  }
+}

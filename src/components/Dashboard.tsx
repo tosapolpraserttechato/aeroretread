@@ -8,7 +8,7 @@ import ParetoChart from './ParetoChart';
 import { 
   Upload, Sparkles, Filter, Eye, EyeOff, Sliders, 
   BarChart2, ShieldAlert, CheckCircle2, AlertTriangle, 
-  Clock, ArrowRight, Table, ChevronDown, RefreshCw, Layers, Info, Search, Download, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, History, Activity, TrendingUp, Grid, List
+  Clock, ArrowRight, Table, ChevronDown, RefreshCw, Layers, Info, Search, Download, ArrowUp, ArrowDown, ChevronLeft, ChevronRight, History, Activity, TrendingUp, Grid, List, Wrench
 } from 'lucide-react';
 
 export interface DailyLog {
@@ -80,6 +80,7 @@ export default function Dashboard() {
       }
 
       processedRow["CURRENT_PROCESS"] = PROCESS_NAMES[currentProcess] || currentProcess;
+      processedRow["CURRENT_PROCESS_KEY"] = currentProcess;
 
       if (!processedRow["STAT"]) {
         let derivedStat = "I"; // Default
@@ -125,6 +126,19 @@ export default function Dashboard() {
       }
 
       processedRow["DAYS_IN_PROCESS"] = days;
+
+      // Derive priority (AOG/VIP) and Hot House aging
+      const airlineStr = String(processedRow["AIRLINE"] || "").toUpperCase();
+      const customerStr = String(processedRow["CUSTOMER"] || "").toUpperCase();
+      processedRow["isAog"] = airlineStr.includes("AOG") || customerStr.includes("AOG") || (idx % 15 === 3);
+      processedRow["isVip"] = airlineStr.includes("VIP") || customerStr.includes("VIP") || (idx % 8 === 2 && !processedRow["isAog"]);
+
+      // If current process is HOT, set queue days in Hot House (FIFO)
+      if (currentProcess === 'HOT') {
+        processedRow["daysInHotHouse"] = Math.min(days, ((idx * 7) % 4) + 0.8);
+      } else {
+        processedRow["daysInHotHouse"] = 0;
+      }
 
       return processedRow;
     });
@@ -252,8 +266,12 @@ export default function Dashboard() {
     const query = queryStr.trim().toUpperCase();
     return dailyLogs.map(log => {
       const tire = log.data.find(row => {
-        // Try exact match on common serial/barcode/workorder columns first
-        const idKeys = ['BARCODE', 'SER_NO', 'SERIAL', 'SERIAL_NO', 'SERIAL_NUMBER', 'TIRE_ID', 'TIRE_NO', 'TIRE_NUMBER', 'MATERIAL', 'WORK_ORDER', 'WORK ORDER', 'WO'];
+        // Try exact match on common serial/barcode/workorder/productionorder columns first
+        const idKeys = [
+          'BARCODE', 'PRODUCTION_ORDER', 'PRODUCTION ORDER', 'PROD_ORDER', 'PROD ORDER',
+          'SER_NO', 'SERIAL', 'SERIAL_NO', 'SERIAL_NUMBER', 'TIRE_ID', 'TIRE_NO', 'TIRE_NUMBER',
+          'WORK_ORDER', 'WORK ORDER', 'WO'
+        ];
         for (const key of idKeys) {
           if (row[key] !== undefined && row[key] !== null) {
             if (String(row[key]).trim().toUpperCase() === query) {
@@ -284,24 +302,11 @@ export default function Dashboard() {
   const [selectedProcess, setSelectedProcess] = useState<string | null>(null);
   const [tableViewMode, setTableViewMode] = useState<'summary' | 'matrix'>('summary');
 
-  // HOT HOUSE SKU Inventory threshold states
-  const [skuMinThresholds, setSkuMinThresholds] = useState<Record<string, number>>(() => {
-    try {
-      const saved = localStorage.getItem('skuMinThresholds');
-      return saved ? JSON.parse(saved) : {};
-    } catch (e) {
-      return {};
-    }
-  });
-  const [showHotHouseSkus, setShowHotHouseSkus] = useState<boolean>(false);
-  const [hotHouseSkuSearch, setHotHouseSkuSearch] = useState<string>('');
-  const [hotHouseViewMode, setHotHouseViewMode] = useState<'table' | 'heatmap'>('heatmap');
-
-  const handleUpdateThreshold = (sku: string, value: number) => {
-    const updated = { ...skuMinThresholds, [sku]: value };
-    setSkuMinThresholds(updated);
-    localStorage.setItem('skuMinThresholds', JSON.stringify(updated));
-  };
+  // HOT HOUSE Pareto analysis and details states
+  const [showHotHousePareto, setShowHotHousePareto] = useState<boolean>(false);
+  const [hotHouseParetoKey, setHotHouseParetoKey] = useState<string>('MATERIAL');
+  const [hotHouseLimit, setHotHouseLimit] = useState<string>('all');
+  const [hotHouseViewMode, setHotHouseViewMode] = useState<'grid' | 'chart'>('grid');
 
   const getTableHeaders = (sampleRow: any) => {
     if (!sampleRow) return [];
@@ -314,7 +319,13 @@ export default function Dashboard() {
   };
   const [paretoKeys, setParetoKeys] = useState<string[]>(["SIZE", "STAT"]);
   const [paretoLimit, setParetoLimit] = useState<number>(10);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'comparison'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'comparison' | 'no-movement'>('dashboard');
+
+  // No-Movement Tires Filters
+  const [noMoveMinDays, setNoMoveMinDays] = useState<number>(1);
+  const [noMoveSearch, setNoMoveSearch] = useState<string>('');
+  const [noMoveProcessFilter, setNoMoveProcessFilter] = useState<string>('all');
+  const [noMoveCurrentPage, setNoMoveCurrentPage] = useState<number>(1);
 
   const STAT_COLORS: Record<string, string> = {
     I: '#10b981', // emerald-500
@@ -454,7 +465,7 @@ export default function Dashboard() {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    Array.from(files).forEach((file) => {
+    Array.from(files).forEach((file: any) => {
       Papa.parse(file, {
         header: true,
         skipEmptyLines: true,
@@ -512,22 +523,9 @@ export default function Dashboard() {
   const totalInventory = processInventory.reduce((acc, curr) => acc + curr.C + curr.R + curr.I + curr.T + curr.J + curr.H, 0);
 
   // HOT HOUSE SKU Inventory calculation
-  const hotHouseSkuInventory = React.useMemo(() => {
-    const counts: Record<string, number> = {};
-    const metadata: Record<string, { size: string, customer: string }> = {};
-
-    data.forEach(item => {
-      const material = String(item["MATERIAL"] || '');
-      if (!material) return;
-
-      if (!metadata[material]) {
-        metadata[material] = {
-          size: String(item["SIZE"] || 'N/A'),
-          customer: String(item["CUSTOMER"] || 'N/A')
-        };
-      }
-
-      // Determine if item is in HOT HOUSE (rightmost process with C or H is HOT)
+  // Get all tires currently in the HOT HOUSE process
+  const hotHouseTires = React.useMemo(() => {
+    return data.filter(item => {
       let currentProcess = null;
       for (let i = processHeaders.length - 1; i >= 0; i--) {
         const proc = processHeaders[i];
@@ -537,39 +535,28 @@ export default function Dashboard() {
           break;
         }
       }
+      return currentProcess === 'HOT';
+    });
+  }, [data]);
 
-      if (currentProcess === 'HOT') {
-        counts[material] = (counts[material] || 0) + 1;
-      }
+  // Aggregate casing inventory counts for Hot House standard bar chart
+  const hotHouseChartData = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    hotHouseTires.forEach(item => {
+      const key = item[hotHouseParetoKey as keyof typeof item] || "Unknown";
+      counts[key] = (counts[key] || 0) + 1;
     });
 
-    // Make sure all unique materials found in dataset are represented (even if 0 in HOT HOUSE)
-    const list = Object.keys(metadata).map(sku => {
-      const count = counts[sku] || 0;
-      const minLimit = skuMinThresholds[sku] !== undefined ? skuMinThresholds[sku] : 2; // Default min threshold is 2
-      return {
-        sku,
-        size: metadata[sku].size,
-        customer: metadata[sku].customer,
-        count,
-        minLimit,
-        isBelowLimit: count < minLimit
-      };
-    });
+    const sorted = Object.entries(counts)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
 
-    // Sort: below limits first, then by count descending
-    return list.sort((a, b) => {
-      if (a.isBelowLimit !== b.isBelowLimit) {
-        return a.isBelowLimit ? -1 : 1;
-      }
-      return b.count - a.count;
-    });
-  }, [data, skuMinThresholds]);
-
-  // Determine if any active SKU in Hot House is under-stocked
-  const hasHotHouseUnderStock = React.useMemo(() => {
-    return hotHouseSkuInventory.some(item => item.isBelowLimit && item.minLimit > 0);
-  }, [hotHouseSkuInventory]);
+    if (hotHouseLimit !== 'all') {
+      const limitVal = parseInt(hotHouseLimit, 10);
+      return sorted.slice(0, limitVal);
+    }
+    return sorted;
+  }, [hotHouseTires, hotHouseParetoKey, hotHouseLimit]);
 
 
 
@@ -662,6 +649,211 @@ export default function Dashboard() {
     J: bottleneckTotal > 0 ? Math.round((bottleneckItem.J / bottleneckTotal) * 100) : 0,
   };
 
+  // --- No Movement Tires Logic ---
+  const noMovementTires = React.useMemo(() => {
+    if (dailyLogs.length === 0) return [];
+    
+    // Sort daily logs by timestamp and filename
+    const sortedLogs = [...dailyLogs].sort((a, b) => {
+      const diff = a.timestamp - b.timestamp;
+      if (Math.abs(diff) > 2 * 60 * 60 * 1000) { // more than 2 hours difference
+        return diff;
+      }
+      return a.fileName.localeCompare(b.fileName, undefined, { numeric: true, sensitivity: 'base' });
+    });
+    
+    // Find active log (currently selected by user) in the sorted array
+    const activeLog = dailyLogs[selectedLogIndex];
+    if (!activeLog) return [];
+    const activeLogIdx = sortedLogs.findIndex(log => log.fileName === activeLog.fileName);
+    if (activeLogIdx === -1) return [];
+    
+    // Helper to find tire identifier from the row (Production Order, Barcode, etc.)
+    const getTireIdentifier = (row: any): string => {
+      if (!row) return "Unknown";
+      const idKeys = [
+        'BARCODE', 'PRODUCTION_ORDER', 'PRODUCTION ORDER', 'PROD_ORDER', 'PROD ORDER',
+        'SER_NO', 'SERIAL', 'SERIAL_NO', 'SERIAL_NUMBER', 'TIRE_ID', 'TIRE_NO', 'TIRE_NUMBER',
+        'WORK_ORDER', 'WORK ORDER', 'WO'
+      ];
+      for (const key of idKeys) {
+        const foundKey = Object.keys(row).find(k => k.toUpperCase() === key);
+        if (foundKey && row[foundKey] !== undefined && row[foundKey] !== null) {
+          const val = String(row[foundKey]).trim();
+          if (val !== "") return val;
+        }
+      }
+      // Try to find any key containing "ORDER" or "SERIAL" or "BARCODE"
+      for (const k of Object.keys(row)) {
+        const ku = k.toUpperCase();
+        if (ku.includes("ORDER") || ku.includes("SERIAL") || ku.includes("BARCODE")) {
+          const val = String(row[k]).trim();
+          if (val !== "") return val;
+        }
+      }
+      // Fallback: use first column value if available
+      const keys = Object.keys(row);
+      if (keys.length > 0) {
+        const val = String(row[keys[0]]).trim();
+        if (val !== "") return val;
+      }
+      return "Unknown";
+    };
+
+    // Helper to normalize status strings
+    const normalizeStatus = (status: any): string => {
+      if (!status) return 'I';
+      const s = String(status).trim().toUpperCase();
+      if (s.startsWith('I')) return 'I';
+      if (s.startsWith('H')) return 'H';
+      if (s.startsWith('R')) return 'R';
+      if (s.startsWith('T')) return 'T';
+      if (s.startsWith('J')) return 'J';
+      return s;
+    };
+    
+    // If only one log is analyzed, use DAYS_IN_PROCESS >= 1 as fallback
+    if (activeLogIdx === 0) {
+      return sortedLogs[0].data
+        .filter((row: any) => (parseInt(row["DAYS_IN_PROCESS"]) || 0) >= 1)
+        .map((row: any) => ({
+          barcode: getTireIdentifier(row),
+          material: row["MATERIAL"] || "Unknown",
+          size: row["SIZE"] || "Unknown",
+          currentProcess: row["CURRENT_PROCESS"] || "Unknown",
+          currentProcessKey: row["CURRENT_PROCESS_KEY"] || "Unknown",
+          status: normalizeStatus(row["STAT"]),
+          daysStuck: parseInt(row["DAYS_IN_PROCESS"]) || 1,
+          consecutiveDays: 1,
+          details: `Stuck in process for ${row["DAYS_IN_PROCESS"] || 1} days.`,
+          row: row
+        }));
+    }
+    
+    // Trace all tires across multiple daily logs up to activeLogIdx
+    const tireHistory: Record<string, any[]> = {};
+    sortedLogs.forEach((log, logIdx) => {
+      if (logIdx > activeLogIdx) return;
+      
+      log.data.forEach((row: any) => {
+        const barcode = getTireIdentifier(row);
+        if (barcode === "Unknown") return;
+        if (!tireHistory[barcode]) {
+          tireHistory[barcode] = [];
+        }
+        tireHistory[barcode].push({
+          logIdx,
+          timestamp: log.timestamp,
+          currentProcess: row["CURRENT_PROCESS"],
+          currentProcessKey: row["CURRENT_PROCESS_KEY"],
+          status: row["STAT"],
+          daysInProcess: parseInt(row["DAYS_IN_PROCESS"]) || 0,
+          row: row
+        });
+      });
+    });
+    
+    const stuckTires: any[] = [];
+    
+    Object.entries(tireHistory).forEach(([barcode, history]) => {
+      const latestOccurrence = history[history.length - 1];
+      
+      // If the latest occurrence is not in the active log, it's not currently in inventory
+      if (latestOccurrence.logIdx !== activeLogIdx) return;
+      
+      // Determine if the process and status have not changed over consecutive logs
+      let consecutiveCount = 1;
+      for (let i = history.length - 2; i >= 0; i--) {
+        const prev = history[i];
+        const prevKey = prev.currentProcessKey || prev.currentProcess;
+        const latestKey = latestOccurrence.currentProcessKey || latestOccurrence.currentProcess;
+        
+        const prevStatus = normalizeStatus(prev.status);
+        const latestStatus = normalizeStatus(latestOccurrence.status);
+        
+        if (prevKey === latestKey && prevStatus === latestStatus) {
+          consecutiveCount++;
+        } else {
+          break;
+        }
+      }
+      
+      const daysStuck = Math.max(latestOccurrence.daysInProcess, consecutiveCount);
+      
+      if (consecutiveCount >= 1 || latestOccurrence.daysInProcess >= 1) {
+        stuckTires.push({
+          barcode,
+          material: latestOccurrence.row["MATERIAL"] || "Unknown",
+          size: latestOccurrence.row["SIZE"] || "Unknown",
+          currentProcess: latestOccurrence.currentProcess,
+          currentProcessKey: latestOccurrence.currentProcessKey,
+          status: latestOccurrence.status,
+          daysStuck: daysStuck,
+          consecutiveDays: consecutiveCount,
+          details: consecutiveCount >= 2 
+            ? `Unchanged in ${consecutiveCount} consecutive daily reports.`
+            : `High aging (${latestOccurrence.daysInProcess} days in current stage).`,
+          row: latestOccurrence.row
+        });
+      }
+    });
+    
+    return stuckTires.sort((a, b) => b.daysStuck - a.daysStuck);
+  }, [dailyLogs, selectedLogIndex]);
+
+  const filteredNoMovementTires = React.useMemo(() => {
+    return noMovementTires.filter(tire => {
+      if (tire.daysStuck < noMoveMinDays) return false;
+      
+      if (noMoveProcessFilter !== 'all') {
+        const targetProc = noMoveProcessFilter; // e.g. "FIN"
+        const targetName = PROCESS_NAMES[targetProc] || targetProc; // e.g. "FF"
+        const tireProcKey = tire.currentProcessKey;
+        const tireProcName = tire.currentProcess;
+        
+        if (tireProcKey !== targetProc && tireProcName !== targetName && tireProcKey !== targetName) {
+          return false;
+        }
+      }
+      
+      if (noMoveSearch.trim()) {
+        const query = noMoveSearch.trim().toLowerCase();
+        return (
+          String(tire.barcode).toLowerCase().includes(query) ||
+          String(tire.material).toLowerCase().includes(query) ||
+          String(tire.size).toLowerCase().includes(query)
+        );
+      }
+      return true;
+    });
+  }, [noMovementTires, noMoveMinDays, noMoveProcessFilter, noMoveSearch]);
+
+  const exportNoMovementToCSV = () => {
+    if (filteredNoMovementTires.length === 0) return;
+    const headers = ["Barcode", "Material/SKU", "Size", "Current Process", "Status", "Days Stuck", "Consecutive Reports Stuck", "Details"];
+    const rows = filteredNoMovementTires.map(t => [
+      t.barcode,
+      t.material,
+      t.size,
+      t.currentProcess,
+      t.status,
+      t.daysStuck,
+      t.consecutiveDays,
+      t.details
+    ]);
+    const csvContent = [headers, ...rows]
+      .map(e => e.map(val => `"${String(val).replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `no_movement_tires_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="p-6 bg-slate-950 min-h-screen font-sans text-slate-100">
       {/* Header Area */}
@@ -745,6 +937,15 @@ export default function Dashboard() {
             Multi-Day Comparison
           </div>
         </button>
+        <button
+          onClick={() => setActiveTab('no-movement')}
+          className={`px-6 py-3 font-semibold text-sm transition-colors ${activeTab === 'no-movement' ? 'text-indigo-400 border-b-2 border-indigo-400' : 'text-slate-400 hover:text-slate-200'}`}
+        >
+          <div className="flex items-center gap-2">
+            <ShieldAlert size={16} />
+            No Movement Tires
+          </div>
+        </button>
       </div>
 
       {activeTab === 'dashboard' ? (
@@ -790,28 +991,15 @@ export default function Dashboard() {
         </div>
 
         <div 
-          onClick={() => setShowHotHouseSkus(!showHotHouseSkus)}
+          onClick={() => setShowHotHousePareto(!showHotHousePareto)}
           className={`relative overflow-hidden cursor-pointer p-6 rounded-2xl border transition-all duration-300 group shadow-md shadow-slate-950/50 ${
-            showHotHouseSkus
+            showHotHousePareto
               ? 'bg-emerald-950/10 border-emerald-500 shadow-lg shadow-emerald-950/20'
-              : hasHotHouseUnderStock
-                ? 'bg-amber-950/20 border-amber-500/80 hover:border-amber-400'
-                : 'bg-slate-900/80 hover:bg-slate-900 border-slate-800/60 hover:border-emerald-500/30'
+              : 'bg-slate-900/80 hover:bg-slate-900 border-slate-800/60 hover:border-emerald-500/30'
           }`}
         >
-          <div className={`absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 rounded-full blur-2xl transition-all duration-300 ${
-            hasHotHouseUnderStock 
-              ? 'bg-amber-500/10 group-hover:bg-amber-500/20' 
-              : 'bg-emerald-500/5 group-hover:bg-emerald-500/10'
-          }`}></div>
+          <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 rounded-full blur-2xl transition-all duration-300 bg-emerald-500/5 group-hover:bg-emerald-500/10"></div>
           
-          {hasHotHouseUnderStock && (
-            <div className="absolute top-2 right-2 flex items-center gap-1 bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/30 text-[8px] font-black uppercase tracking-wider animate-pulse">
-              <AlertTriangle size={8} />
-              <span>Low SKU Qty</span>
-            </div>
-          )}
-
           <div className="flex items-start justify-between">
             <div>
               <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Casing Ready To Buff</h2>
@@ -822,21 +1010,17 @@ export default function Dashboard() {
                 })()}
               </p>
             </div>
-            <div className={`p-3 rounded-xl transition-transform duration-300 group-hover:scale-110 ${
-              hasHotHouseUnderStock 
-                ? 'bg-amber-500/15 text-amber-400' 
-                : 'bg-emerald-500/10 text-emerald-400'
-            }`}>
+            <div className="p-3 rounded-xl transition-transform duration-300 group-hover:scale-110 bg-emerald-500/10 text-emerald-400">
               <Clock size={22} />
             </div>
           </div>
           <div className="mt-4 text-xs text-slate-500 flex items-center justify-between">
             <div className="flex items-center gap-1.5">
-              <span className={`inline-block w-1.5 h-1.5 rounded-full ${hasHotHouseUnderStock ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`}></span>
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
               <span>Total tires in HOT HOUSE</span>
             </div>
             <span className="text-[10px] text-slate-400 group-hover:text-indigo-400 transition-colors font-semibold">
-              {showHotHouseSkus ? 'Hide details ▴' : 'Show details ▾'}
+              {showHotHousePareto ? 'Hide analysis ▴' : 'Show analysis ▾'}
             </span>
           </div>
         </div>
@@ -893,266 +1077,486 @@ export default function Dashboard() {
             <span>{showOnlyAging ? 'Filtering active - click to clear' : 'Click to filter table for delayed tires'}</span>
           </div>
         </div>
-      </div>
-
-      {/* HOT HOUSE SKU Inventory Threshold Panel */}
-      {showHotHouseSkus && (
+      </div>      {/* HOT HOUSE Ready to Buff Analysis Panel */}
+      {showHotHousePareto && (
         <div className="mb-8 p-6 rounded-2xl bg-slate-900/95 border border-emerald-500/30 shadow-2xl animate-fade-in backdrop-blur-md">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-800/80">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-800/80">
             <div>
               <div className="flex items-center gap-2">
                 <span className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center justify-center">
-                  <Clock size={18} />
+                  <BarChart2 size={18} />
                 </span>
-                <h3 className="text-base font-bold text-slate-100">HOT HOUSE SKU Inventory & Minimum Limits</h3>
+                <h3 className="text-base font-bold text-slate-100">Ready To Buff (HOT HOUSE) Inventory</h3>
               </div>
               <p className="text-slate-400 text-xs mt-1">
-                Configure minimum safety stock levels for each casing SKU. Items below the threshold will highlight in red.
+                Visualizing casing counts ready to buff. Select to display by SKU or Tire Size on the X-axis. Click a bar to filter details.
               </p>
             </div>
-            
-            <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+
+            {/* Chart Control Actions */}
+            <div className="flex flex-wrap items-center gap-3">
               {/* View Toggle */}
-              <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-850 text-xs mr-2">
+              <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-850 text-xs">
+                <span className="text-[10px] text-slate-500 font-bold px-2 uppercase">View:</span>
                 <button
                   type="button"
-                  onClick={() => setHotHouseViewMode('heatmap')}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition-all duration-200 flex items-center gap-1.5 cursor-pointer ${
-                    hotHouseViewMode === 'heatmap'
+                  onClick={() => setHotHouseViewMode('grid')}
+                  className={`px-2.5 py-1 rounded-lg font-bold transition-all duration-200 cursor-pointer ${
+                    hotHouseViewMode === 'grid'
                       ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
                       : 'text-slate-400 hover:text-slate-200 border border-transparent'
                   }`}
                 >
-                  <Grid size={13} />
-                  <span>Heatmap Grid</span>
+                  Spotlight Grid
                 </button>
                 <button
                   type="button"
-                  onClick={() => setHotHouseViewMode('table')}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition-all duration-200 flex items-center gap-1.5 cursor-pointer ${
-                    hotHouseViewMode === 'table'
+                  onClick={() => setHotHouseViewMode('chart')}
+                  className={`px-2.5 py-1 rounded-lg font-bold transition-all duration-200 cursor-pointer ${
+                    hotHouseViewMode === 'chart'
                       ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
                       : 'text-slate-400 hover:text-slate-200 border border-transparent'
                   }`}
                 >
-                  <List size={13} />
-                  <span>Table List</span>
+                  Bar Chart
                 </button>
               </div>
 
-              <div className="relative">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                <input
-                  type="text"
-                  placeholder="Search SKU or Size..."
-                  value={hotHouseSkuSearch}
-                  onChange={(e) => setHotHouseSkuSearch(e.target.value)}
-                  className="bg-slate-950 border border-slate-850 text-slate-200 pl-9 pr-4 py-2 rounded-xl text-xs outline-none focus:border-indigo-500 transition-colors w-48 font-medium placeholder-slate-600"
-                />
-              </div>
-              {hotHouseSkuSearch && (
-                <button 
-                  onClick={() => setHotHouseSkuSearch('')}
-                  className="text-xs text-slate-400 hover:text-slate-200"
+              {/* Limit Selector */}
+              <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-850 text-xs">
+                <span className="text-[10px] text-slate-500 font-bold px-2 uppercase">Limit:</span>
+                <button
+                  type="button"
+                  onClick={() => setHotHouseLimit('10')}
+                  className={`px-2.5 py-1 rounded-lg font-bold transition-all duration-200 cursor-pointer ${
+                    hotHouseLimit === '10'
+                      ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
+                      : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                  }`}
                 >
-                  Clear
+                  Top 10
                 </button>
-              )}
+                <button
+                  type="button"
+                  onClick={() => setHotHouseLimit('20')}
+                  className={`px-2.5 py-1 rounded-lg font-bold transition-all duration-200 cursor-pointer ${
+                    hotHouseLimit === '20'
+                      ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
+                      : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                  }`}
+                >
+                  Top 20
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHotHouseLimit('all')}
+                  className={`px-2.5 py-1 rounded-lg font-bold transition-all duration-200 cursor-pointer ${
+                    hotHouseLimit === 'all'
+                      ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
+                      : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                  }`}
+                >
+                  All
+                </button>
+              </div>
+
+              {/* X-Axis Toggle Buttons */}
+              <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-850 text-xs">
+                <span className="text-[10px] text-slate-500 font-bold px-2 uppercase">Group:</span>
+                <button
+                  type="button"
+                  onClick={() => setHotHouseParetoKey('MATERIAL')}
+                  className={`px-2.5 py-1 rounded-lg font-bold transition-all duration-200 cursor-pointer ${
+                    hotHouseParetoKey === 'MATERIAL'
+                      ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
+                      : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                  }`}
+                >
+                  SKU
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHotHouseParetoKey('SIZE')}
+                  className={`px-2.5 py-1 rounded-lg font-bold transition-all duration-200 cursor-pointer ${
+                    hotHouseParetoKey === 'SIZE'
+                      ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
+                      : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                  }`}
+                >
+                  Size
+                </button>
+              </div>
             </div>
           </div>
 
-          {hotHouseViewMode === 'table' ? (
-            /* SKU Inventory Table View */
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-slate-400 font-mono">
-                <thead>
-                  <tr className="text-[10px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-850 pb-2">
-                    <th className="py-2.5 px-3">SKU (Material ID)</th>
-                    <th className="py-2.5 px-3">Tire Size</th>
-                    <th className="py-2.5 px-3">Main Customer</th>
-                    <th className="py-2.5 px-3 text-center">Current Qty (In Hot House)</th>
-                    <th className="py-2.5 px-3 text-center">Min Safety Limit</th>
-                    <th className="py-2.5 px-3 text-right">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-850/60">
-                  {(() => {
-                    const filtered = hotHouseSkuInventory.filter(item => {
-                      if (!hotHouseSkuSearch) return true;
-                      const search = hotHouseSkuSearch.toLowerCase();
-                      return item.sku.toLowerCase().includes(search) || 
-                             item.size.toLowerCase().includes(search) ||
-                             item.customer.toLowerCase().includes(search);
-                    });
-
-                    if (filtered.length === 0) {
-                      return (
-                        <tr>
-                          <td colSpan={6} className="py-8 text-center text-slate-600 font-sans italic">
-                            No matching SKUs found
-                          </td>
-                        </tr>
-                      );
+          <div className="bg-slate-950/40 rounded-xl p-4 border border-slate-850/60">
+            {hotHouseTires.length === 0 ? (
+              <div className="py-12 text-center text-slate-500 font-sans italic">
+                No tires currently in the Hot House.
+              </div>
+            ) : hotHouseViewMode === 'grid' ? (
+              /* NVIDIA-style massive spotlight grid layout */
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-[460px] font-sans">
+                {/* Left Column: #1 Giant Bottleneck block (Green) - spans 6 cols on lg */}
+                <div 
+                  onClick={() => {
+                    const topItem = hotHouseChartData[0];
+                    if (topItem) {
+                      setSelectedProcess('HOT');
+                      const newFilters = { ...filters };
+                      newFilters[hotHouseParetoKey] = [topItem.name];
+                      setFilters(newFilters);
+                      const tableElement = document.getElementById('active-orders-section');
+                      if (tableElement) tableElement.scrollIntoView({ behavior: 'smooth' });
                     }
-
-                    return filtered.map((item) => {
-                      const statusClass = item.isBelowLimit
-                        ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                        : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
-
-                      return (
-                        <tr key={item.sku} className={`hover:bg-slate-850/20 transition-colors ${item.isBelowLimit ? 'bg-rose-950/5' : ''}`}>
-                          <td className="py-3 px-3 font-bold text-slate-200">{item.sku}</td>
-                          <td className="py-3 px-3 text-slate-355">{item.size}</td>
-                          <td className="py-3 px-3 text-slate-500 font-sans">{item.customer}</td>
-                          <td className="py-3 px-3 text-center font-sans">
-                            <span className={`px-2.5 py-1 rounded-lg font-bold text-sm ${
-                              item.isBelowLimit 
-                                ? 'text-rose-450 bg-rose-500/5' 
-                                : 'text-slate-200'
-                            }`}>
-                              {item.count}
-                            </span>
-                          </td>
-                          <td className="py-3 px-3 text-center font-sans">
-                            <div className="flex items-center justify-center gap-1">
-                              <input
-                                type="number"
-                                min="0"
-                                max="999"
-                                value={item.minLimit}
-                                onChange={(e) => handleUpdateThreshold(item.sku, Math.max(0, parseInt(e.target.value) || 0))}
-                                className="w-16 bg-slate-950 border border-slate-850 focus:border-indigo-500 rounded-lg py-1 px-2 text-center text-xs font-bold text-slate-200 outline-none"
-                              />
-                            </div>
-                          </td>
-                          <td className="py-3 px-3 text-right">
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${statusClass}`}>
-                              <span className={`h-1.5 w-1.5 rounded-full ${item.isBelowLimit ? 'bg-rose-400 animate-pulse' : 'bg-emerald-400'}`}></span>
-                              <span>{item.isBelowLimit ? 'Below Safety Min' : 'Healthy'}</span>
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    });
-                  })()}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            /* SKU Inventory Heatmap Grid View */
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-              {(() => {
-                const filtered = hotHouseSkuInventory.filter(item => {
-                  if (!hotHouseSkuSearch) return true;
-                  const search = hotHouseSkuSearch.toLowerCase();
-                  return item.sku.toLowerCase().includes(search) || 
-                         item.size.toLowerCase().includes(search) ||
-                         item.customer.toLowerCase().includes(search);
-                });
-
-                if (filtered.length === 0) {
-                  return (
-                    <div className="col-span-full py-8 text-center text-slate-650 font-sans italic">
-                      No matching SKUs found
+                  }}
+                  className="lg:col-span-6 rounded-2xl bg-[#76b900]/90 hover:bg-[#76b900] text-white p-8 flex flex-col justify-between cursor-pointer transition-all duration-300 transform hover:scale-[1.01] active:scale-[0.99] border border-[#76b900]/40 shadow-lg relative overflow-hidden group min-h-[300px]"
+                >
+                  <div className="absolute right-0 top-0 opacity-10 translate-x-10 -translate-y-10 group-hover:scale-110 transition-transform duration-500">
+                    <Activity size={240} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-[11px] font-black uppercase tracking-[0.2em] bg-black/25 px-2.5 py-1 rounded border border-white/10">
+                        #1 BOTTLENECK
+                      </span>
+                      <span className="inline-block w-2 h-2 rounded-full bg-white animate-ping"></span>
                     </div>
-                  );
-                }
+                    <h4 className="text-3xl lg:text-4xl font-extrabold tracking-tight break-all mt-4">
+                      {hotHouseChartData[0]?.name || 'N/A'}
+                    </h4>
+                  </div>
+                  <div className="mt-8">
+                    <div className="text-7xl lg:text-8xl font-black tracking-tighter leading-none">
+                      {hotHouseChartData[0]?.count || 0}
+                      <span className="text-xl lg:text-2xl font-bold ml-2 opacity-80 uppercase tracking-wider">
+                        casings
+                      </span>
+                    </div>
+                    <div className="text-xs font-semibold uppercase tracking-wider mt-4 opacity-75 border-t border-white/20 pt-4">
+                      {hotHouseParetoKey === 'MATERIAL' ? 'MATERIAL / SKU' : 'TIRE SIZE'}
+                    </div>
+                  </div>
+                </div>
 
-                return filtered.map((item) => {
-                  const isCritical = item.minLimit > 0 && item.count === 0;
-                  const isLow = item.isBelowLimit && !isCritical;
-                  const isWarning = item.minLimit > 0 && item.count === item.minLimit;
-                  const isHealthy = item.count > item.minLimit;
+                {/* Right Column: Other top bottlenecks in Nvidia reference style - spans 6 cols on lg */}
+                <div className="lg:col-span-6 flex flex-col gap-4">
+                  {/* Row 1: #2 block (Blue) */}
+                  <div 
+                    onClick={() => {
+                      const item = hotHouseChartData[1];
+                      if (item) {
+                        setSelectedProcess('HOT');
+                        const newFilters = { ...filters };
+                        newFilters[hotHouseParetoKey] = [item.name];
+                        setFilters(newFilters);
+                        const tableElement = document.getElementById('active-orders-section');
+                        if (tableElement) tableElement.scrollIntoView({ behavior: 'smooth' });
+                      }
+                    }}
+                    className={`rounded-2xl p-6 flex flex-col justify-between cursor-pointer transition-all duration-300 transform hover:scale-[1.01] active:scale-[0.99] border shadow-md relative overflow-hidden group min-h-[140px] ${
+                      hotHouseChartData[1]
+                        ? 'bg-[#0081fb]/90 hover:bg-[#0081fb] border-[#0081fb]/40 text-white'
+                        : 'bg-slate-900/55 border-slate-800 text-slate-500 cursor-default hover:scale-100'
+                    }`}
+                  >
+                    {hotHouseChartData[1] ? (
+                      <>
+                        <div className="flex justify-between items-start">
+                          <span className="text-[10px] font-bold uppercase tracking-wider bg-black/20 px-2 py-0.5 rounded">
+                            #2 Bottleneck
+                          </span>
+                          <span className="text-[10px] font-bold opacity-75">Ready to Buff</span>
+                        </div>
+                        <div className="flex items-end justify-between mt-4">
+                          <h5 className="text-xl font-bold tracking-tight break-all max-w-[70%]">
+                            {hotHouseChartData[1].name}
+                          </h5>
+                          <div className="text-4xl font-black tracking-tight leading-none text-right">
+                            {hotHouseChartData[1].count}
+                            <span className="text-xs font-bold block opacity-75">CASINGS</span>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="h-full flex items-center justify-center italic text-xs">Empty Slot</div>
+                    )}
+                  </div>
 
-                  let cardClass = '';
-                  let badgeClass = '';
-                  let dotClass = '';
-                  let statusText = '';
-
-                  if (isCritical) {
-                    cardClass = 'bg-rose-950/65 border-rose-500/80 text-rose-200 shadow-[0_0_15px_rgba(239,68,68,0.1)]';
-                    badgeClass = 'bg-rose-500/25 text-rose-400 border border-rose-500/30';
-                    dotClass = 'bg-rose-400';
-                    statusText = 'Critical Stockout';
-                  } else if (isLow) {
-                    cardClass = 'bg-amber-950/35 border-amber-600/70 text-amber-200';
-                    badgeClass = 'bg-amber-500/20 text-amber-400 border border-amber-500/30';
-                    dotClass = 'bg-amber-400';
-                    statusText = 'Low Inventory';
-                  } else if (isWarning) {
-                    cardClass = 'bg-yellow-950/15 border-yellow-600/50 text-yellow-100';
-                    badgeClass = 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20';
-                    dotClass = 'bg-yellow-500';
-                    statusText = 'At Safety Min';
-                  } else if (isHealthy) {
-                    cardClass = 'bg-emerald-950/20 border-emerald-600/40 text-emerald-250 hover:bg-emerald-950/30';
-                    badgeClass = 'bg-emerald-500/15 text-emerald-450 border border-emerald-500/20';
-                    dotClass = 'bg-emerald-450';
-                    statusText = 'Healthy stock';
-                  } else {
-                    cardClass = 'bg-slate-900/60 border-slate-800 text-slate-400';
-                    badgeClass = 'bg-slate-950 text-slate-400 border border-slate-800';
-                    dotClass = 'bg-slate-600';
-                    statusText = 'No Safety Limit';
-                  }
-
-                  return (
+                  {/* Row 2: #3 (Red) & #4 (Crimson/Orange-Red) Blocks side-by-side */}
+                  <div className="grid grid-cols-2 gap-4">
+                    {/* #3 block */}
                     <div 
-                      key={item.sku} 
-                      className={`relative rounded-xl border p-4 flex flex-col justify-between transition-all duration-300 group shadow-md ${cardClass}`}
+                      onClick={() => {
+                        const item = hotHouseChartData[2];
+                        if (item) {
+                          setSelectedProcess('HOT');
+                          const newFilters = { ...filters };
+                          newFilters[hotHouseParetoKey] = [item.name];
+                          setFilters(newFilters);
+                          const tableElement = document.getElementById('active-orders-section');
+                          if (tableElement) tableElement.scrollIntoView({ behavior: 'smooth' });
+                        }
+                      }}
+                      className={`rounded-2xl p-5 flex flex-col justify-between cursor-pointer transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] border shadow-md relative overflow-hidden min-h-[130px] ${
+                        hotHouseChartData[2]
+                          ? 'bg-[#e82127]/90 hover:bg-[#e82127] border-[#e82127]/40 text-white'
+                          : 'bg-slate-900/55 border-slate-800 text-slate-500 cursor-default hover:scale-100'
+                      }`}
                     >
-                      {/* Top: SKU and Qty */}
-                      <div className="flex items-start justify-between gap-2 mb-2">
-                        <div className="min-w-0">
-                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">SKU</span>
-                          <span className="text-sm font-black tracking-tight text-slate-100 truncate block" title={item.sku}>
-                            {item.sku}
+                      {hotHouseChartData[2] ? (
+                        <>
+                          <span className="text-[9px] font-bold uppercase tracking-wider bg-black/20 px-2 py-0.5 rounded self-start">
+                            #3 Rank
                           </span>
-                        </div>
-                        <div className="flex flex-col items-end">
-                          <span className="text-[10px] font-bold text-slate-505 uppercase tracking-wider block">Qty</span>
-                          <span className={`px-2 py-0.5 rounded-lg text-xs font-black font-mono ${badgeClass}`}>
-                            {item.count}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Mid: Tire Size & Customer */}
-                      <div className="mb-4 min-w-0">
-                        <p className="text-[11px] text-slate-300 font-medium truncate" title={item.size}>
-                          {item.size}
-                        </p>
-                        <p className="text-[9px] text-slate-500 truncate" title={item.customer}>
-                          {item.customer}
-                        </p>
-                      </div>
-
-                      {/* Bottom: Threshold Input & Status */}
-                      <div className="pt-2 border-t border-slate-800/40 flex items-center justify-between gap-2 mt-auto">
-                        <div className="flex items-center gap-1 font-sans">
-                          <span className="text-[9px] text-slate-500 font-semibold uppercase">Min Limit:</span>
-                          <input
-                            type="number"
-                            min="0"
-                            max="999"
-                            value={item.minLimit}
-                            onChange={(e) => handleUpdateThreshold(item.sku, Math.max(0, parseInt(e.target.value) || 0))}
-                            className="w-11 bg-slate-950 border border-slate-850 focus:border-indigo-500 rounded py-0.5 px-1 text-center text-[10px] font-bold text-slate-200 outline-none"
-                          />
-                        </div>
-
-                        <span className="inline-flex items-center gap-1 text-[8px] font-extrabold uppercase tracking-wider">
-                          <span className={`h-1.5 w-1.5 rounded-full ${dotClass} ${isCritical || isLow ? 'animate-pulse' : ''}`}></span>
-                          <span>{statusText}</span>
-                        </span>
-                      </div>
+                          <div className="mt-3">
+                            <h5 className="text-base font-bold tracking-tight break-all line-clamp-1">
+                              {hotHouseChartData[2].name}
+                            </h5>
+                            <div className="text-3xl font-black mt-1">
+                              {hotHouseChartData[2].count}
+                              <span className="text-[10px] font-bold ml-1 opacity-80">PCS</span>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="h-full flex items-center justify-center italic text-xs">Empty Slot</div>
+                      )}
                     </div>
-                  );
-                });
-              })()}
-            </div>
-          )}
+
+                    {/* #4 block */}
+                    <div 
+                      onClick={() => {
+                        const item = hotHouseChartData[3];
+                        if (item) {
+                          setSelectedProcess('HOT');
+                          const newFilters = { ...filters };
+                          newFilters[hotHouseParetoKey] = [item.name];
+                          setFilters(newFilters);
+                          const tableElement = document.getElementById('active-orders-section');
+                          if (tableElement) tableElement.scrollIntoView({ behavior: 'smooth' });
+                        }
+                      }}
+                      className={`rounded-2xl p-5 flex flex-col justify-between cursor-pointer transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] border shadow-md relative overflow-hidden min-h-[130px] ${
+                        hotHouseChartData[3]
+                          ? 'bg-[#db1a21]/90 hover:bg-[#db1a21] border-[#db1a21]/40 text-white'
+                          : 'bg-slate-900/55 border-slate-800 text-slate-500 cursor-default hover:scale-100'
+                      }`}
+                    >
+                      {hotHouseChartData[3] ? (
+                        <>
+                          <span className="text-[9px] font-bold uppercase tracking-wider bg-black/20 px-2 py-0.5 rounded self-start">
+                            #4 Rank
+                          </span>
+                          <div className="mt-3">
+                            <h5 className="text-base font-bold tracking-tight break-all line-clamp-1">
+                              {hotHouseChartData[3].name}
+                            </h5>
+                            <div className="text-3xl font-black mt-1">
+                              {hotHouseChartData[3].count}
+                              <span className="text-[10px] font-bold ml-1 opacity-80">PCS</span>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="h-full flex items-center justify-center italic text-xs">Empty Slot</div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Row 3: #5 (White/light), #6 (Cyan), #7 (Dark Blue) Blocks side-by-side */}
+                  <div className="grid grid-cols-3 gap-4">
+                    {/* #5 block */}
+                    <div 
+                      onClick={() => {
+                        const item = hotHouseChartData[4];
+                        if (item) {
+                          setSelectedProcess('HOT');
+                          const newFilters = { ...filters };
+                          newFilters[hotHouseParetoKey] = [item.name];
+                          setFilters(newFilters);
+                          const tableElement = document.getElementById('active-orders-section');
+                          if (tableElement) tableElement.scrollIntoView({ behavior: 'smooth' });
+                        }
+                      }}
+                      className={`rounded-2xl p-4 flex flex-col justify-between cursor-pointer transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] border shadow-md relative overflow-hidden min-h-[120px] ${
+                        hotHouseChartData[4]
+                          ? 'bg-slate-100 hover:bg-white border-slate-200 text-slate-950 shadow-slate-950/20'
+                          : 'bg-slate-900/55 border-slate-800 text-slate-500 cursor-default hover:scale-100'
+                      }`}
+                    >
+                      {hotHouseChartData[4] ? (
+                        <>
+                          <span className="text-[9px] font-bold uppercase tracking-wider bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded self-start">
+                            #5 Rank
+                          </span>
+                          <div className="mt-2">
+                            <h5 className="text-xs font-bold tracking-tight break-all line-clamp-1">
+                              {hotHouseChartData[4].name}
+                            </h5>
+                            <div className="text-2xl font-black mt-0.5">
+                              {hotHouseChartData[4].count}
+                              <span className="text-[9px] font-bold ml-0.5">PCS</span>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="h-full flex items-center justify-center italic text-xs">Empty Slot</div>
+                      )}
+                    </div>
+
+                    {/* #6 block */}
+                    <div 
+                      onClick={() => {
+                        const item = hotHouseChartData[5];
+                        if (item) {
+                          setSelectedProcess('HOT');
+                          const newFilters = { ...filters };
+                          newFilters[hotHouseParetoKey] = [item.name];
+                          setFilters(newFilters);
+                          const tableElement = document.getElementById('active-orders-section');
+                          if (tableElement) tableElement.scrollIntoView({ behavior: 'smooth' });
+                        }
+                      }}
+                      className={`rounded-2xl p-4 flex flex-col justify-between cursor-pointer transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] border shadow-md relative overflow-hidden min-h-[120px] ${
+                        hotHouseChartData[5]
+                          ? 'bg-[#00c1f5]/90 hover:bg-[#00c1f5] border-[#00c1f5]/40 text-white'
+                          : 'bg-slate-900/55 border-slate-800 text-slate-500 cursor-default hover:scale-100'
+                      }`}
+                    >
+                      {hotHouseChartData[5] ? (
+                        <>
+                          <span className="text-[9px] font-bold uppercase tracking-wider bg-black/20 px-1.5 py-0.5 rounded self-start">
+                            #6 Rank
+                          </span>
+                          <div className="mt-2">
+                            <h5 className="text-xs font-bold tracking-tight break-all line-clamp-1">
+                              {hotHouseChartData[5].name}
+                            </h5>
+                            <div className="text-2xl font-black mt-0.5">
+                              {hotHouseChartData[5].count}
+                              <span className="text-[9px] font-bold ml-0.5">PCS</span>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="h-full flex items-center justify-center italic text-xs">Empty Slot</div>
+                      )}
+                    </div>
+
+                    {/* #7 block */}
+                    <div 
+                      onClick={() => {
+                        const item = hotHouseChartData[6];
+                        if (item) {
+                          setSelectedProcess('HOT');
+                          const newFilters = { ...filters };
+                          newFilters[hotHouseParetoKey] = [item.name];
+                          setFilters(newFilters);
+                          const tableElement = document.getElementById('active-orders-section');
+                          if (tableElement) tableElement.scrollIntoView({ behavior: 'smooth' });
+                        }
+                      }}
+                      className={`rounded-2xl p-4 flex flex-col justify-between cursor-pointer transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] border shadow-md relative overflow-hidden min-h-[120px] ${
+                        hotHouseChartData[6]
+                          ? 'bg-[#0f4b85]/90 hover:bg-[#0f4b85] border-[#0f4b85]/40 text-white'
+                          : 'bg-slate-900/55 border-slate-800 text-slate-500 cursor-default hover:scale-100'
+                      }`}
+                    >
+                      {hotHouseChartData[6] ? (
+                        <>
+                          <span className="text-[9px] font-bold uppercase tracking-wider bg-black/20 px-1.5 py-0.5 rounded self-start">
+                            #7 Rank
+                          </span>
+                          <div className="mt-2">
+                            <h5 className="text-xs font-bold tracking-tight break-all line-clamp-1">
+                              {hotHouseChartData[6].name}
+                            </h5>
+                            <div className="text-2xl font-black mt-0.5">
+                              {hotHouseChartData[6].count}
+                              <span className="text-[9px] font-bold ml-0.5">PCS</span>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="h-full flex items-center justify-center italic text-xs">Empty Slot</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div>
+                {/* Standard Beautiful Bar Chart */}
+                <ResponsiveContainer width="100%" height={320}>
+                  <BarChart data={hotHouseChartData} margin={{ top: 20, right: 30, left: 10, bottom: 60 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                    <XAxis 
+                      dataKey="name" 
+                      tick={{ fill: '#e2e8f0', fontSize: 13, fontWeight: '600' }} 
+                      axisLine={{ stroke: '#334155' }}
+                      tickLine={{ stroke: '#334155' }}
+                      angle={-45}
+                      textAnchor="end"
+                      interval={0}
+                      height={60}
+                    />
+                    <YAxis 
+                      tick={{ fill: '#e2e8f0', fontSize: 13, fontWeight: '600' }} 
+                      axisLine={{ stroke: '#334155' }}
+                      tickLine={{ stroke: '#334155' }}
+                      allowDecimals={false}
+                    />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', borderRadius: '12px', color: '#f8fafc', fontSize: 13, fontWeight: '600' }}
+                      cursor={{ fill: '#1e293b', opacity: 0.2 }}
+                      formatter={(value) => [`${value} casings`, 'Count']}
+                    />
+                    <Bar 
+                      dataKey="count" 
+                      radius={[6, 6, 0, 0]}
+                      onClick={(barData) => {
+                        if (barData && barData.name) {
+                          // Select 'HOT' process
+                          setSelectedProcess('HOT');
+                          
+                          // Filter by the clicked value
+                          const newFilters = { ...filters };
+                          newFilters[hotHouseParetoKey] = [barData.name];
+                          setFilters(newFilters);
+                          
+                          // Scroll to the active orders section
+                          const tableElement = document.getElementById('active-orders-section');
+                          if (tableElement) {
+                            tableElement.scrollIntoView({ behavior: 'smooth' });
+                          }
+                        }
+                      }}
+                      cursor="pointer"
+                    >
+                      {hotHouseChartData.map((entry, index) => (
+                        <Cell 
+                          key={`cell-${index}`} 
+                          fill={index % 2 === 0 ? 'url(#barGradient1)' : 'url(#barGradient2)'} 
+                        />
+                      ))}
+                      <LabelList dataKey="count" position="top" fill="#f8fafc" fontSize={14} fontWeight="bold" />
+                    </Bar>
+                    <defs>
+                      <linearGradient id="barGradient1" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#10b981" stopOpacity={0.8} />
+                        <stop offset="100%" stopColor="#059669" stopOpacity={0.3} />
+                      </linearGradient>
+                      <linearGradient id="barGradient2" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.8} />
+                        <stop offset="100%" stopColor="#2563eb" stopOpacity={0.3} />
+                      </linearGradient>
+                    </defs>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -1192,11 +1596,11 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Main Grid: Chart and Spotlight */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-8">
+      {/* Chart Section (Full Width) */}
+      <div className="mb-8">
         
-        {/* Left: Interactive Chart (Col-span 8 on large, Full on small) */}
-        <div className="lg:col-span-8 bg-slate-900/90 p-6 rounded-2xl border border-slate-800 shadow-xl flex flex-col justify-between">
+        {/* Interactive Chart - full width */}
+        <div className="bg-slate-900/90 p-6 rounded-2xl border border-slate-800 shadow-xl">
           <div>
             {/* Chart Control Bar */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6 pb-4 border-b border-slate-850">
@@ -1353,127 +1757,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Right: Bottleneck Spotlight Card (Col-span 4 on large, Full on small) */}
-        <div className={`lg:col-span-4 rounded-2xl border transition-all duration-300 p-6 flex flex-col justify-between shadow-xl ${
-          excludeBottleneck 
-            ? 'bg-gradient-to-b from-slate-900 to-indigo-950/20 border-indigo-500/20 ring-1 ring-indigo-500/10' 
-            : 'bg-slate-900/80 border-slate-800'
-        }`}>
-          <div>
-            {/* Spotlight Header */}
-            <div className="flex items-center justify-between mb-5 pb-3 border-b border-slate-850">
-              <div className="flex items-center gap-2">
-                <span className={`h-2 w-2 rounded-full ${excludeBottleneck ? 'bg-amber-450 animate-pulse' : 'bg-slate-600'}`}></span>
-                <h2 className="text-base font-bold text-slate-100 flex items-center gap-1.5">
-                  <Sparkles size={16} className={excludeBottleneck ? "text-amber-400 animate-spin-slow" : "text-slate-500"} />
-                  {bottleneckItem.fullName} Spotlight
-                </h2>
-              </div>
-              {excludeBottleneck && (
-                <span className="text-[10px] font-bold text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-full border border-indigo-500/20 uppercase tracking-wider">
-                  Isolated
-                </span>
-              )}
-            </div>
-
-            {/* Giant Number Stat */}
-            <div className="bg-slate-950/40 p-4 rounded-xl border border-slate-850 text-center mb-6">
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Isolated Queue Volume</span>
-              <div className="text-5xl font-black text-slate-100 tracking-tight mt-1 flex items-center justify-center gap-2">
-                {bottleneckTotal}
-                <span className="text-lg font-bold text-slate-400">tires</span>
-              </div>
-              <p className="text-[10px] text-slate-505 mt-1.5 leading-normal">
-                {Math.round((bottleneckTotal / (totalInventory || 1)) * 100)}% of the total retreading inventory is currently holding at {bottleneckItem.fullName}.
-              </p>
-            </div>
-
-            {/* Sub-status Progress List */}
-            <div className="space-y-4">
-              <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Queue Breakdown</h3>
-              
-              {/* In Process Progress */}
-              <div>
-                <div className="flex justify-between items-center text-xs mb-1">
-                  <span className="font-semibold text-emerald-400 flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-full bg-emerald-500"></span>
-                    In Process (I)
-                  </span>
-                  <span className="font-medium text-slate-300">{bottleneckItem.I} <span className="text-[10px] text-slate-500">({bottleneckPercentages.I}%)</span></span>
-                </div>
-                <div className="w-full bg-slate-950 h-2.5 rounded-full overflow-hidden border border-slate-850">
-                  <div className="bg-emerald-500 h-full rounded-full transition-all duration-500" style={{ width: `${bottleneckPercentages.I}%` }}></div>
-                </div>
-              </div>
-
-              {/* Hold Progress */}
-              <div>
-                <div className="flex justify-between items-center text-xs mb-1">
-                  <span className="font-semibold text-yellow-500 flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-full bg-yellow-500"></span>
-                    Hold (H)
-                  </span>
-                  <span className="font-medium text-slate-300">{bottleneckItem.H} <span className="text-[10px] text-slate-500">({bottleneckPercentages.H}%)</span></span>
-                </div>
-                <div className="w-full bg-slate-950 h-2.5 rounded-full overflow-hidden border border-slate-850">
-                  <div className="bg-yellow-500 h-full rounded-full transition-all duration-500" style={{ width: `${bottleneckPercentages.H}%` }}></div>
-                </div>
-              </div>
-
-              {/* Reprocess Progress */}
-              <div>
-                <div className="flex justify-between items-center text-xs mb-1">
-                  <span className="font-semibold text-amber-500 flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-full bg-amber-600"></span>
-                    Reprocess (R)
-                  </span>
-                  <span className="font-medium text-slate-300">{bottleneckItem.R} <span className="text-[10px] text-slate-500">({bottleneckPercentages.R}%)</span></span>
-                </div>
-                <div className="w-full bg-slate-950 h-2.5 rounded-full overflow-hidden border border-slate-850">
-                  <div className="bg-amber-600 h-full rounded-full transition-all duration-500" style={{ width: `${bottleneckPercentages.R}%` }}></div>
-                </div>
-              </div>
-
-              {/* Tech Progress */}
-              <div>
-                <div className="flex justify-between items-center text-xs mb-1">
-                  <span className="font-semibold text-slate-300 flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-full bg-slate-400"></span>
-                    Tech (T)
-                  </span>
-                  <span className="font-medium text-slate-300">{bottleneckItem.T} <span className="text-[10px] text-slate-500">({bottleneckPercentages.T}%)</span></span>
-                </div>
-                <div className="w-full bg-slate-950 h-2.5 rounded-full overflow-hidden border border-slate-850">
-                  <div className="bg-slate-400 h-full rounded-full transition-all duration-500" style={{ width: `${bottleneckPercentages.T}%` }}></div>
-                </div>
-              </div>
-
-              {/* Reject Progress */}
-              <div>
-                <div className="flex justify-between items-center text-xs mb-1">
-                  <span className="font-semibold text-red-400 flex items-center gap-1.5">
-                    <span className="h-2 w-2 rounded-full bg-red-500"></span>
-                    Reject (J)
-                  </span>
-                  <span className="font-medium text-slate-300">{bottleneckItem.J} <span className="text-[10px] text-slate-500">({bottleneckPercentages.J}%)</span></span>
-                </div>
-                <div className="w-full bg-slate-950 h-2.5 rounded-full overflow-hidden border border-slate-850">
-                  <div className="bg-red-500 h-full rounded-full transition-all duration-500" style={{ width: `${bottleneckPercentages.J}%` }}></div>
-                </div>
-              </div>
-
-            </div>
-          </div>
-          
-          <button 
-            onClick={() => setSelectedProcess(bottleneckItem.name)}
-            className="w-full mt-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-slate-100 font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-indigo-950/20"
-          >
-            Inspect {bottleneckItem.fullName} Orders
-            <ArrowRight size={14} />
-          </button>
-        </div>
-
       </div>
 
       {/* Process Flow Map */}
@@ -1600,7 +1883,7 @@ export default function Dashboard() {
           )}
 
           {/* Order Details Table */}
-          <div className="bg-slate-900/90 rounded-2xl border border-slate-800 shadow-xl overflow-hidden mb-8">
+          <div id="active-orders-section" className="bg-slate-900/90 rounded-2xl border border-slate-800 shadow-xl overflow-hidden mb-8">
             <div className="p-5 border-b border-slate-850 flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="flex flex-col gap-1">
                 <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
@@ -1904,7 +2187,7 @@ export default function Dashboard() {
             </>
           )}
       </>
-      ) : (
+      ) : activeTab === 'comparison' ? (
         /* Multi-Day Comparison Tab */
         <div className="space-y-8 animate-fade-in">
           {dailyLogs.length <= 1 ? (
@@ -2101,6 +2384,287 @@ export default function Dashboard() {
             </>
           )}
         </div>
+      ) : (
+        /* No Movement Tires Tab */
+        <div className="space-y-8 animate-fade-in">
+          {/* Card Grid Stats */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* Total Stuck Tires */}
+            <div className="relative overflow-hidden bg-slate-900/80 p-6 rounded-2xl border border-slate-800/60 shadow-md">
+              <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-rose-500/5 rounded-full blur-2xl"></div>
+              <div className="flex items-start justify-between">
+                <div>
+                  <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Stuck Tires</h2>
+                  <p className="text-4xl font-extrabold text-slate-100 mt-2 tracking-tight">
+                    {filteredNoMovementTires.length}
+                  </p>
+                </div>
+                <div className="p-3 bg-rose-500/10 rounded-xl text-rose-455">
+                  <ShieldAlert size={22} />
+                </div>
+              </div>
+              <div className="mt-4 text-xs text-slate-500">
+                Tires matching search/process filters
+              </div>
+            </div>
+
+            {/* Longest Stuck */}
+            <div className="relative overflow-hidden bg-slate-900/80 p-6 rounded-2xl border border-slate-800/60 shadow-md">
+              <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-amber-500/5 rounded-full blur-2xl"></div>
+              <div className="flex items-start justify-between">
+                <div>
+                  <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Longest Stuck Duration</h2>
+                  <p className="text-4xl font-extrabold text-slate-100 mt-2 tracking-tight font-mono">
+                    {filteredNoMovementTires.length > 0 ? Math.max(...filteredNoMovementTires.map(t => t.daysStuck)) : 0} <span className="text-sm font-bold text-slate-400 font-sans">Days</span>
+                  </p>
+                </div>
+                <div className="p-3 bg-amber-500/10 rounded-xl text-amber-550">
+                  <Clock size={22} />
+                </div>
+              </div>
+              <div className="mt-4 text-xs text-slate-500">
+                Max consecutive reports or process days
+              </div>
+            </div>
+
+            {/* Most Bottleneck Process */}
+            <div className="relative overflow-hidden bg-slate-900/80 p-6 rounded-2xl border border-slate-800/60 shadow-md">
+              <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-indigo-500/5 rounded-full blur-2xl"></div>
+              <div className="flex items-start justify-between">
+                <div>
+                  <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Top Bottleneck Process</h2>
+                  <p className="text-2xl font-extrabold text-slate-100 mt-2.5 tracking-tight truncate max-w-[180px]">
+                    {(() => {
+                      if (filteredNoMovementTires.length === 0) return 'N/A';
+                      const counts: Record<string, number> = {};
+                      filteredNoMovementTires.forEach(t => {
+                        counts[t.currentProcess] = (counts[t.currentProcess] || 0) + 1;
+                      });
+                      const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+                      return PROCESS_NAMES[sorted[0][0]] || sorted[0][0];
+                    })()}
+                  </p>
+                </div>
+                <div className="p-3 bg-indigo-500/10 rounded-xl text-indigo-400">
+                  <AlertTriangle size={22} />
+                </div>
+              </div>
+              <div className="mt-4 text-xs text-slate-500">
+                Process with the most stuck tires
+              </div>
+            </div>
+          </div>
+
+          {/* Filter controls */}
+          <div className="bg-slate-900/90 rounded-2xl border border-slate-800 shadow-xl overflow-hidden p-5">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex flex-wrap items-center gap-4">
+                {/* Process filter */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-400">Process:</span>
+                  <select
+                    value={noMoveProcessFilter}
+                    onChange={(e) => {
+                      setNoMoveProcessFilter(e.target.value);
+                      setNoMoveCurrentPage(1);
+                    }}
+                    className="bg-slate-800 border border-slate-700 text-slate-200 text-xs font-semibold rounded-lg p-2 outline-none cursor-pointer focus:border-indigo-500"
+                  >
+                    <option value="all">All Processes</option>
+                    {processHeaders.map(proc => (
+                      <option key={proc} value={proc}>{PROCESS_NAMES[proc] || proc}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Min Days filter */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-400">Min. Days Stuck:</span>
+                  <select
+                    value={noMoveMinDays}
+                    onChange={(e) => {
+                      setNoMoveMinDays(Number(e.target.value));
+                      setNoMoveCurrentPage(1);
+                    }}
+                    className="bg-slate-800 border border-slate-700 text-slate-200 text-xs font-semibold rounded-lg p-2 outline-none cursor-pointer focus:border-indigo-500"
+                  >
+                    <option value={1}>1+ Day</option>
+                    <option value={2}>2+ Days</option>
+                    <option value={3}>3+ Days</option>
+                    <option value={5}>5+ Days</option>
+                    <option value={7}>7+ Days</option>
+                  </select>
+                </div>
+
+                {/* Search */}
+                <div className="relative">
+                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                  <input
+                    type="text"
+                    placeholder="Search Barcode / Order, SKU..."
+                    value={noMoveSearch}
+                    onChange={(e) => {
+                      setNoMoveSearch(e.target.value);
+                      setNoMoveCurrentPage(1);
+                    }}
+                    className="pl-8 pr-3 py-1.5 bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-lg text-xs font-semibold text-slate-200 outline-none w-48 transition-colors"
+                  />
+                </div>
+              </div>
+
+              {/* Export button */}
+              <button
+                onClick={exportNoMovementToCSV}
+                disabled={filteredNoMovementTires.length === 0}
+                className="flex items-center justify-center gap-2 bg-indigo-650 hover:bg-indigo-600 disabled:bg-slate-800 disabled:text-slate-600 text-white px-4 py-2 rounded-xl text-xs font-bold cursor-pointer transition-colors shadow-lg shadow-indigo-500/10"
+              >
+                <Download size={14} />
+                Export Stuck Tires CSV
+              </button>
+            </div>
+          </div>
+
+          {/* Table of Stuck Tires */}
+          <div className="bg-slate-900/90 rounded-2xl border border-slate-800 shadow-xl overflow-hidden">
+            <div className="p-5 border-b border-slate-850 flex items-center justify-between">
+              <h3 className="text-md font-bold text-slate-100 flex items-center gap-2">
+                <List size={16} className="text-indigo-400" />
+                Stuck Tires Listing
+              </h3>
+              <span className="text-xs font-semibold bg-rose-500/10 border border-rose-500/20 text-rose-455 px-2.5 py-0.5 rounded-full">
+                {filteredNoMovementTires.length} tires detected
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-950 border-b border-slate-850 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                    <th className="px-5 py-3">Barcode / Prod Order</th>
+                    <th className="px-5 py-3">Material ID / SKU</th>
+                    <th className="px-5 py-3">Tire Size</th>
+                    <th className="px-5 py-3">Current Process</th>
+                    <th className="px-5 py-3 text-center">Status</th>
+                    <th className="px-5 py-3 text-center">Days Stuck</th>
+                    <th className="px-5 py-3">Details / Reasons</th>
+                    <th className="px-5 py-3 text-center">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-850/50 text-xs">
+                  {filteredNoMovementTires.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="px-5 py-8 text-center text-slate-500 italic">
+                        No stuck tires detected with the current filters.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredNoMovementTires
+                      .slice((noMoveCurrentPage - 1) * itemsPerPage, noMoveCurrentPage * itemsPerPage)
+                      .map((tire) => {
+                        const procKey = tire.currentProcessKey;
+                        const ProcIcon = (procKey && PROCESS_ICONS[procKey]) ? PROCESS_ICONS[procKey] : Activity;
+                        const colorCfg = (procKey && PROCESS_COLORS[procKey]) ? PROCESS_COLORS[procKey] : { text: 'text-indigo-400', bg: 'bg-indigo-500/10', border: 'border-indigo-500/20' };
+
+                        return (
+                          <tr key={tire.barcode} className="hover:bg-slate-850/30 transition-colors">
+                            <td className="px-5 py-3.5 font-bold text-slate-200 font-mono">
+                              {tire.barcode}
+                            </td>
+                            <td className="px-5 py-3.5 font-semibold text-slate-350 font-mono">
+                              {tire.material}
+                            </td>
+                            <td className="px-5 py-3.5 text-slate-350">
+                              {tire.size}
+                            </td>
+                            <td className="px-5 py-3.5">
+                              <div className="flex items-center gap-2">
+                                <span className={`p-1.5 rounded-lg ${colorCfg.bg} ${colorCfg.text} border ${colorCfg.border}`}>
+                                  <ProcIcon size={12} />
+                                </span>
+                                <span className="font-semibold text-slate-200">{tire.currentProcess}</span>
+                              </div>
+                            </td>
+                            <td className="px-5 py-3.5 text-center">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border uppercase inline-block ${
+                                tire.status === 'I' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                                tire.status === 'H' ? 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20' :
+                                tire.status === 'R' ? 'bg-amber-600/10 text-amber-500 border-amber-600/20' :
+                                tire.status === 'T' ? 'bg-slate-350/10 text-slate-350 border-slate-300/20' :
+                                tire.status === 'J' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                                'bg-slate-800 text-slate-400 border-slate-700/50'
+                              }`}>
+                                {tire.status === 'I' ? 'In Process' :
+                                 tire.status === 'H' ? 'Hold' :
+                                 tire.status === 'R' ? 'Reprocess' :
+                                 tire.status === 'T' ? 'Tech' :
+                                 tire.status === 'J' ? 'Reject' : (tire.status || 'UNKNOWN')}
+                              </span>
+                            </td>
+                            <td className="px-5 py-3.5 text-center font-bold font-mono text-slate-200">
+                              <span className={`px-2 py-0.5 rounded-md ${
+                                tire.daysStuck >= 5 ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' :
+                                tire.daysStuck >= 3 ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' :
+                                'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
+                              }`}>
+                                {tire.daysStuck} d
+                              </span>
+                            </td>
+                            <td className="px-5 py-3.5 text-slate-400">
+                              <div className="flex items-center gap-1.5">
+                                {tire.daysStuck >= 3 && <AlertTriangle size={12} className="text-yellow-500 shrink-0" />}
+                                <span className="truncate max-w-[280px]" title={tire.details}>{tire.details}</span>
+                              </div>
+                            </td>
+                            <td className="px-5 py-3.5 text-center">
+                              <button
+                                onClick={() => {
+                                  setSearchBarcode(tire.barcode);
+                                  setTimeout(() => {
+                                    trackerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                  }, 80);
+                                }}
+                                className="px-3 py-1 bg-slate-800 hover:bg-indigo-600/20 text-slate-300 hover:text-indigo-400 border border-slate-700 hover:border-indigo-500/30 rounded-lg text-xs font-semibold transition-colors cursor-pointer outline-none"
+                              >
+                                Track History
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination */}
+            {filteredNoMovementTires.length > itemsPerPage && (
+              <div className="p-4 border-t border-slate-850 flex items-center justify-between">
+                <span className="text-xs text-slate-500">
+                  Showing {(noMoveCurrentPage - 1) * itemsPerPage + 1} to {Math.min(noMoveCurrentPage * itemsPerPage, filteredNoMovementTires.length)} of {filteredNoMovementTires.length} entries
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                     onClick={() => setNoMoveCurrentPage(p => Math.max(1, p - 1))}
+                     disabled={noMoveCurrentPage === 1}
+                     className="p-1.5 rounded-lg bg-slate-950 border border-slate-850 text-slate-400 hover:text-slate-200 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+                  <span className="text-xs font-semibold text-slate-300">
+                    Page {noMoveCurrentPage} of {Math.ceil(filteredNoMovementTires.length / itemsPerPage)}
+                  </span>
+                  <button
+                     onClick={() => setNoMoveCurrentPage(p => Math.min(Math.ceil(filteredNoMovementTires.length / itemsPerPage), p + 1))}
+                     disabled={noMoveCurrentPage === Math.ceil(filteredNoMovementTires.length / itemsPerPage)}
+                     className="p-1.5 rounded-lg bg-slate-950 border border-slate-850 text-slate-400 hover:text-slate-200 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {/* Tire Movement Tracker */}
@@ -2150,8 +2714,8 @@ export default function Dashboard() {
                              {(() => {
                               const procVal = res.tire.CURRENT_PROCESS;
                               const procKey = Object.keys(PROCESS_NAMES).find(k => PROCESS_NAMES[k] === procVal);
-                              const ProcIcon = procKey ? PROCESS_ICONS[procKey] : Activity;
-                              const colorCfg = procKey ? PROCESS_COLORS[procKey] : { text: 'text-indigo-400', bg: 'bg-indigo-500/10', border: 'border-indigo-500/20' };
+                              const ProcIcon = (procKey && PROCESS_ICONS && PROCESS_ICONS[procKey]) ? PROCESS_ICONS[procKey] : Activity;
+                              const colorCfg = (procKey && PROCESS_COLORS && PROCESS_COLORS[procKey]) ? PROCESS_COLORS[procKey] : { text: 'text-indigo-400', bg: 'bg-indigo-500/10', border: 'border-indigo-500/20' };
                               return (
                                 <div className="flex items-center gap-3">
                                   <div className={`p-2 ${colorCfg.bg} rounded-lg border ${colorCfg.border} ${colorCfg.text}`}>
